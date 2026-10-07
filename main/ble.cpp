@@ -9,6 +9,7 @@
 
 #include "ble.hpp"
 #include "bsp.hpp"
+#include "controller_manager.hpp"
 #include "format.hpp"
 #include "status_led.hpp"
 
@@ -18,15 +19,7 @@
 
 static uint32_t scanTimeMs = 5000; // scan time in milliseconds, 0 = scan forever
 static std::unique_ptr<espp::Timer> scanTimer;
-// read from other tasks (the USB RX worker's status queries), written by the
-// BLE callbacks / scan timer: keep them atomic
-static std::atomic<bool> subscribed{false};
-// the link is encrypted (bonded / re-bonded); protected HID characteristics are
-// only discoverable + subscribable after this
-static std::atomic<bool> authenticated{false};
-static std::atomic<int64_t> connected_at_us{0};
-static std::atomic<int64_t> last_secure_request_us{0};
-static std::atomic<uint8_t> subscribe_attempts{0};
+
 // a connection attempt is in flight (the scan was stopped for it): the
 // supervisor must not restart the scan underneath it
 static std::atomic<bool> connect_pending{false};
@@ -35,11 +28,7 @@ static std::atomic<int64_t> connect_started_us{0};
 // that a rescan goes back to reconnecting bonded controllers only
 static std::atomic<int64_t> pairing_until_us{0};
 
-// link diagnostics, exposed to the console (a "connected but no inputs" report
-// is much easier to chase when it says whether notifications are arriving and
-// which step of the link bring-up it is stuck in)
-static std::atomic<uint32_t> notification_count{0};
-static std::atomic<int64_t> last_notify_us{-1};
+// Global link state (simplified for multi-controller: reports state of active controller)
 static std::atomic<BleLinkState> link_state{BleLinkState::Idle};
 static std::mutex link_detail_mutex;
 static std::string link_detail;
@@ -59,13 +48,6 @@ static NimBLEUUID battery_level_uuid(espp::BatteryService::BATTERY_LEVEL_CHAR_UU
 static std::atomic<bool> is_pairing{true};
 static notify_callback_t notify_callback = nullptr;
 static disconnect_callback_t disconnect_callback = nullptr;
-
-// Which HID report id each subscribed characteristic carries (from its Report
-// Reference descriptor), so the app can route a notification by report id
-// instead of assuming every notification is the gamepad input report. Cleared
-// on disconnect (the characteristic objects die with the client).
-static std::mutex report_map_mutex;
-static std::unordered_map<const NimBLERemoteCharacteristic *, uint8_t> report_ids;
 
 // The controller's name, reported to the app once it is connected + subscribed
 // (see ble_set_bond_name_callback). The advertised name is captured when we
@@ -120,22 +102,61 @@ static std::string read_controller_name(NimBLEClient *client) {
 }
 
 // Forget everything about the current link. Called from the NimBLE host task
-// (disconnect callback) and from the scan timer (missed disconnect); the app is
-// told through the disconnect callback so it can neutralize its inputs.
-static void reset_link_state(const std::string &why) {
-  const bool was_subscribed = subscribed.exchange(false);
-  authenticated = false;
-  subscribe_attempts = 0;
-  {
-    std::lock_guard<std::mutex> lk(report_map_mutex);
-    report_ids.clear();
-  }
-  set_link_detail(why);
+// Helper: get controller state from client
+static ControllerState *get_controller_by_client(NimBLEClient *client) {
+  if (!client)
+    return nullptr;
+  return ControllerManager::instance().get(client->getPeerAddress());
+}
+
+// Helper: get controller state from characteristic
+static ControllerState *get_controller_by_characteristic(NimBLERemoteCharacteristic *chr) {
+  if (!chr || !chr->getRemoteService())
+    return nullptr;
+  auto *client = chr->getRemoteService()->getClient();
+  if (!client)
+    return nullptr;
+  return ControllerManager::instance().get(client->getPeerAddress());
+}
+
+// Reset state for a specific controller (called on disconnect)
+static void reset_controller_state(const NimBLEAddress &addr, const std::string &why) {
+  auto *state = ControllerManager::instance().get(addr);
+  if (!state)
+    return;
+
+  const bool was_subscribed = state->subscribed;
+  state->subscribed = false;
+  state->authenticated = false;
+  state->subscribe_attempts = 0;
+  state->report_ids.clear();
+  state->link_detail = why;
+
   if (was_subscribed) {
-    ble_logger.info("controller link down ({}); {} notifications received", why,
-                    notification_count.load());
+    ble_logger.info("controller {} link down ({}); {} notifications received",
+                    addr.toString(), why, state->notification_count);
+  }
+
+  // Remove from manager
+  ControllerManager::instance().remove(addr);
+
+  // If this was the only/active controller, notify app
+  if (was_subscribed && ControllerManager::instance().count() == 0) {
     if (disconnect_callback)
       disconnect_callback();
+  }
+
+  // Update global link state
+  if (ControllerManager::instance().count() == 0) {
+    link_state = BleLinkState::Idle;
+  }
+}
+
+// Legacy function for compatibility - resets active controller
+static void reset_link_state(const std::string &why) {
+  auto active = ControllerManager::instance().get_active();
+  if (active.has_value()) {
+    reset_controller_state(active.value(), why);
   }
 }
 
@@ -144,15 +165,18 @@ static void reset_link_state(const std::string &why) {
 // keep the "controller is sending inputs" diagnostics fresh), then hand it to
 // the app.
 static void on_notify(NimBLERemoteCharacteristic *chr, uint8_t *data, size_t len, bool is_notify) {
-  bool is_input_report = false;
-  {
-    std::lock_guard<std::mutex> lk(report_map_mutex);
-    is_input_report = report_ids.contains(chr);
-  }
+  auto *state = get_controller_by_characteristic(chr);
+  if (!state)
+    return;
+
+  // Check if this is an input report for this controller
+  bool is_input_report = state->report_ids.contains(chr);
+
   if (is_input_report) {
-    notification_count.fetch_add(1);
-    last_notify_us.store(esp_timer_get_time());
+    state->notification_count++;
+    state->last_notify_us = esp_timer_get_time();
   }
+
   if (notify_callback)
     notify_callback(chr, data, len, is_notify);
 }
@@ -240,12 +264,29 @@ class ClientCallbacks : public NimBLEClientCallbacks {
   void onConnect(NimBLEClient *pClient) override {
     logger.info("connected to: {}", pClient->getPeerAddress().toString());
     connect_pending = false;
-    authenticated = false;
-    subscribe_attempts = 0;
-    connected_at_us = esp_timer_get_time();
-    last_secure_request_us = connected_at_us.load();
-    link_state = BleLinkState::Encrypting;
-    set_link_detail("connected; waiting for the link to be encrypted");
+
+    const int64_t now = esp_timer_get_time();
+    const auto &addr = pClient->getPeerAddress();
+
+    // Create or update controller state
+    ControllerState state;
+    state.client = pClient;
+    state.address = addr;
+    state.authenticated = false;
+    state.subscribed = false;
+    state.subscribe_attempts = 0;
+    state.connected_at_us = now;
+    state.last_secure_request_us = now;
+    state.link_detail = "connected; waiting for the link to be encrypted";
+
+    ControllerManager::instance().add_or_update(addr, state);
+
+    // Update global link state for active controller
+    if (ControllerManager::instance().is_active(addr)) {
+      link_state = BleLinkState::Encrypting;
+      set_link_detail(state.link_detail);
+    }
+
     static constexpr bool async = true;
     // set the connection parameters now that we've connected
     pClient->setConnectionParams(min_conn_interval, max_conn_interval, conn_latency,
@@ -270,26 +311,37 @@ class ClientCallbacks : public NimBLEClientCallbacks {
   void onDisconnect(NimBLEClient *pClient, int reason) override {
     logger.info("{} disconnected, reason = {}", pClient->getPeerAddress().toString(), reason);
     connect_pending = false;
-    // drop the link state (and neutralize the app's inputs); the scan timer
-    // restarts the scan (and the LED) within one period
-    reset_link_state(fmt::format("disconnected (reason {})", reason));
+    // drop the controller state; the scan timer restarts the scan (and the LED) within one period
+    reset_controller_state(pClient->getPeerAddress(),
+                          fmt::format("disconnected (reason {})", reason));
   }
 
   void onAuthenticationComplete(NimBLEConnInfo &connInfo) override {
+    auto *pClient = NimBLEDevice::getClientByHandle(connInfo.getConnHandle());
+    if (!pClient)
+      return;
+
+    auto *state = get_controller_by_client(pClient);
+    if (!state)
+      return;
+
     if (!connInfo.isEncrypted()) {
       logger.error("Encrypt connection failed - disconnecting");
-      set_link_detail("encryption failed; disconnected");
-      /** Find the client with the connection handle provided in connInfo */
-      NimBLEDevice::getClientByHandle(connInfo.getConnHandle())->disconnect();
+      state->link_detail = "encryption failed; disconnected";
+      if (ControllerManager::instance().is_active(state->address)) {
+        set_link_detail(state->link_detail);
+      }
+      pClient->disconnect();
       return;
     } else {
-      logger.info("Encryption successful!");
+      logger.info("Encryption successful for {}", pClient->getPeerAddress().toString());
       // set the connection parameters
-      NimBLEDevice::getClientByHandle(connInfo.getConnHandle())
-          ->updateConnParams(min_conn_interval, max_conn_interval, conn_latency,
-                             supervision_timeout);
+      pClient->updateConnParams(min_conn_interval, max_conn_interval, conn_latency,
+                                supervision_timeout);
       // the protected HID characteristics can be discovered + subscribed now
-      authenticated = true;
+      state->authenticated = true;
+    }
+  }
     }
   }
 };
@@ -402,12 +454,16 @@ static ScanCallbacks scanCallbacks;
 // number of characteristics subscribed; `why` explains a zero result.
 static size_t subscribe_input_reports(NimBLEClient *client, std::string &why) {
   static constexpr bool refresh = true;
-  {
-    // refreshing the services replaces the characteristic objects: never keep
-    // the previous attempt's (dangling) entries
-    std::lock_guard<std::mutex> lk(report_map_mutex);
-    report_ids.clear();
+
+  auto *state = get_controller_by_client(client);
+  if (!state) {
+    why = "controller state not found";
+    return 0;
   }
+
+  // Clear previous attempt's entries for this controller
+  state->report_ids.clear();
+
   const auto &services = client->getServices(refresh);
   auto *svc = client->getService(hid_service_uuid);
   if (!svc) {
@@ -430,22 +486,19 @@ static size_t subscribe_input_reports(NimBLEClient *client, std::string &why) {
       }
     }
     if (!chr->subscribe(true, on_notify)) {
-      ble_logger.warn("could not subscribe to input report {}", report_id);
+      ble_logger.warn("could not subscribe to input report {} for {}",
+                      report_id, client->getPeerAddress().toString());
       ++failed;
       continue;
     }
-    {
-      std::lock_guard<std::mutex> lk(report_map_mutex);
-      report_ids[chr] = report_id;
-    }
-    ble_logger.info("subscribed to HID input report id {} (handle {:#06x})", report_id,
-                    chr->getHandle());
+    state->report_ids[chr] = report_id;
+    ble_logger.info("subscribed to HID input report id {} (handle {:#06x}) for {}",
+                    report_id, chr->getHandle(), client->getPeerAddress().toString());
     ++count;
   }
   if (failed) {
     why = fmt::format("subscribing to {} of {} input reports failed", failed, count + failed);
-    std::lock_guard<std::mutex> lk(report_map_mutex);
-    report_ids.clear(); // the next attempt subscribes them all again
+    state->report_ids.clear(); // the next attempt subscribes them all again
     return 0;
   }
   if (count == 0) {
@@ -478,7 +531,7 @@ static void ensure_scanning(int64_t now) {
 // The link supervisor, run every 100 ms on its own task: it owns the LED, the
 // scan restart, the encryption retry and the HID subscription, so the whole
 // bring-up is driven from one place regardless of which BLE callback did (or
-// did not) fire.
+// did not) fire. Now handles multiple controllers.
 static bool timer_callback() {
   const int64_t now = esp_timer_get_time();
   auto pClients = NimBLEDevice::getConnectedClients();
@@ -486,8 +539,12 @@ static bool timer_callback() {
   if (pClients.empty()) {
     // A disconnect callback can be missed (e.g. the client object went away):
     // never leave the link marked up when nothing is connected.
-    if (subscribed)
-      reset_link_state("no connected client");
+    if (ControllerManager::instance().count() > 0) {
+      ble_logger.info("no BLE clients connected but controller manager has entries; clearing");
+      ControllerManager::instance().clear();
+      if (disconnect_callback)
+        disconnect_callback();
+    }
     if (connect_pending) {
       // a connection attempt is in flight: leave the radio alone (bounded, in
       // case its result callback never arrives)
@@ -506,106 +563,147 @@ static bool timer_callback() {
 
   set_led_breathing(false);
   update_led_connected();
-  if (subscribed)
-    return false;
 
-  auto *pClient = pClients.front();
-  if (!pClient->isConnected())
-    return false;
-  if (connect_pending) {
-    // the link is up but NimBLE delivers onConnect one connection interval
-    // later: wait for it (it stamps connected_at_us and requests security),
-    // bounded in case it never arrives
-    link_state = BleLinkState::Connecting;
-    if (now - connect_started_us.load() < kConnectTimeoutUs)
-      return false;
-    ble_logger.warn("connected, but the connect callback never arrived; carrying on");
-    connect_pending = false;
-    connected_at_us = now;
-    last_secure_request_us = now;
-  }
+  // Process each connected controller
+  bool any_subscribed = false;
+  for (auto *pClient : pClients) {
+    if (!pClient || !pClient->isConnected())
+      continue;
 
-  // The HID input reports are protected: wait for the bond/encryption to
-  // complete before discovering and subscribing (trying earlier used to fail
-  // and, worse, delete the bond). The encryption state is polled from the
-  // connection itself rather than trusted to the callback alone, the security
-  // request is repeated if nothing happens, and the controller gets a bounded
-  // time to pair before the link is dropped so the scan can start over.
-  if (!authenticated && pClient->getConnInfo().isEncrypted()) {
-    ble_logger.info("link is encrypted");
-    pClient->updateConnParams(min_conn_interval, max_conn_interval, conn_latency,
-                              supervision_timeout);
-    authenticated = true;
-  }
-  if (!authenticated) {
-    link_state = BleLinkState::Encrypting;
-    const int64_t waited_us = now - connected_at_us.load();
-    if (waited_us > kAuthTimeoutUs) {
-      ble_logger.warn("controller did not complete encryption in time; disconnecting");
-      set_link_detail(fmt::format("controller did not encrypt the link within {} s; disconnected",
-                                  kAuthTimeoutUs / 1000000));
+    const auto &addr = pClient->getPeerAddress();
+    auto *state = ControllerManager::instance().get(addr);
+
+    if (!state) {
+      // Controller not in manager yet, might be mid-connection
+      if (connect_pending) {
+        link_state = BleLinkState::Connecting;
+        if (now - connect_started_us.load() < kConnectTimeoutUs)
+          continue;
+        ble_logger.warn("connected to {}, but the connect callback never arrived; carrying on",
+                        addr.toString());
+        connect_pending = false;
+
+        // Create state manually
+        ControllerState new_state;
+        new_state.client = pClient;
+        new_state.address = addr;
+        new_state.connected_at_us = now;
+        new_state.last_secure_request_us = now;
+        ControllerManager::instance().add_or_update(addr, new_state);
+        state = ControllerManager::instance().get(addr);
+      } else {
+        continue;
+      }
+    }
+
+    if (state->subscribed) {
+      any_subscribed = true;
+      continue; // already fully set up
+    }
+
+    // The HID input reports are protected: wait for the bond/encryption to
+    // complete before discovering and subscribing
+    if (!state->authenticated && pClient->getConnInfo().isEncrypted()) {
+      ble_logger.info("link to {} is encrypted", addr.toString());
+      pClient->updateConnParams(min_conn_interval, max_conn_interval, conn_latency,
+                                supervision_timeout);
+      state->authenticated = true;
+      ControllerManager::instance().add_or_update(addr, *state);
+    }
+
+    if (!state->authenticated) {
+      const int64_t waited_us = now - state->connected_at_us;
+      if (waited_us > kAuthTimeoutUs) {
+        ble_logger.warn("controller {} did not complete encryption in time; disconnecting",
+                        addr.toString());
+        state->link_detail = fmt::format("controller did not encrypt the link within {} s; disconnected",
+                                        kAuthTimeoutUs / 1000000);
+        ControllerManager::instance().add_or_update(addr, *state);
+        pClient->disconnect();
+        continue;
+      }
+      if (now - state->last_secure_request_us > kSecureRetryUs) {
+        state->last_secure_request_us = now;
+        ble_logger.warn("link to {} not encrypted after {} ms; requesting security again",
+                        addr.toString(), waited_us / 1000);
+        state->link_detail = fmt::format("waiting for encryption ({} s); security requested again",
+                                        waited_us / 1000000);
+        ControllerManager::instance().add_or_update(addr, *state);
+        pClient->secureConnection(true);
+      }
+      continue;
+    }
+
+    // Discovery + subscribe takes a while; try every ~500 ms (this timer runs at
+    // 100 ms) and bounded, then drop the connection so the scan can start over.
+    static uint8_t throttle = 0;
+    if (++throttle % 5 != 1)
+      continue;
+
+    const uint8_t attempt = ++state->subscribe_attempts;
+    if (attempt > kMaxSubscribeAttempts) {
+      ble_logger.error("could not subscribe to controller {} HID reports after {} attempts; "
+                       "disconnecting (bond kept)", addr.toString(), kMaxSubscribeAttempts);
+      state->link_detail = fmt::format("could not subscribe to the HID input reports after {} attempts; "
+                                      "disconnected (bond kept)", kMaxSubscribeAttempts);
+      ControllerManager::instance().add_or_update(addr, *state);
       pClient->disconnect();
-      return false;
+      continue;
     }
-    if (now - last_secure_request_us.load() > kSecureRetryUs) {
-      last_secure_request_us = now;
-      ble_logger.warn("link not encrypted after {} ms; requesting security again",
-                      waited_us / 1000);
-      set_link_detail(fmt::format("waiting for encryption ({} s); security requested again",
-                                  waited_us / 1000000));
-      pClient->secureConnection(true);
+
+    std::string why;
+    if (subscribe_input_reports(pClient, why) == 0) {
+      ble_logger.warn("no HID input report subscribed for {} (attempt {}/{}): {}",
+                      addr.toString(), attempt, kMaxSubscribeAttempts, why);
+      state->link_detail = fmt::format("{} (attempt {}/{})", why, attempt, kMaxSubscribeAttempts);
+      ControllerManager::instance().add_or_update(addr, *state);
+      continue;
     }
-    return false;
+
+    state->notification_count = 0;
+    state->last_notify_us = -1;
+    state->subscribed = true;
+    state->link_detail = fmt::format("subscribed on attempt {}", attempt);
+    any_subscribed = true;
+
+    // Subscribe to battery service if it exists
+    if (auto *pBatterySvc = pClient->getService(battery_service_uuid)) {
+      pBatterySvc->getCharacteristics(true);
+      if (auto *pBatteryChr = pBatterySvc->getCharacteristic(battery_level_uuid)) {
+        pBatteryChr->subscribe(pBatteryChr->canNotify(), on_notify);
+      }
+    }
+
+    // Report the controller's name
+    if (bond_name_callback) {
+      const NimBLEAddress id = pClient->getConnInfo().getIdAddress();
+      std::array<uint8_t, 6> address{};
+      std::copy(id.getVal(), id.getVal() + address.size(), address.begin());
+      state->name = read_controller_name(pClient);
+      bond_name_callback(address, id.getType(), state->name);
+    }
+
+    ControllerManager::instance().add_or_update(addr, *state);
+    ble_logger.info("Controller {} fully connected ({} total)", addr.toString(),
+                    ControllerManager::instance().count());
   }
 
-  // Discovery + subscribe takes a while; try every ~500 ms (this timer runs at
-  // 100 ms) and bounded, then drop the connection so the scan can start over.
-  // A failed attempt is NOT a reason to forget the bond: transient discovery
-  // failures right after a reconnect are normal.
-  link_state = BleLinkState::Subscribing;
-  static uint8_t throttle = 0;
-  if (++throttle % 5 != 1)
-    return false;
-  const uint8_t attempt = ++subscribe_attempts;
-  if (attempt > kMaxSubscribeAttempts) {
-    ble_logger.error("could not subscribe to the controller's HID reports after {} attempts; "
-                     "disconnecting (bond kept)",
-                     kMaxSubscribeAttempts);
-    set_link_detail(fmt::format("could not subscribe to the HID input reports after {} attempts; "
-                                "disconnected (bond kept)",
-                                kMaxSubscribeAttempts));
-    pClient->disconnect();
-    return false;
-  }
-  std::string why;
-  if (subscribe_input_reports(pClient, why) == 0) {
-    ble_logger.warn("no HID input report subscribed (attempt {}/{}): {}", attempt,
-                    kMaxSubscribeAttempts, why);
-    set_link_detail(fmt::format("{} (attempt {}/{})", why, attempt, kMaxSubscribeAttempts));
-    return false;
-  }
-  notification_count = 0;
-  last_notify_us = -1;
-  subscribed = true;
-  link_state = BleLinkState::Subscribed;
-  set_link_detail(fmt::format("subscribed on attempt {}", attempt));
-
-  // we were able to get the HID service and subscribe, so also subscribe
-  // to the battery service if it exists.
-  if (auto *pBatterySvc = pClient->getService(battery_service_uuid)) {
-    pBatterySvc->getCharacteristics(true);
-    if (auto *pBatteryChr = pBatterySvc->getCharacteristic(battery_level_uuid)) {
-      // ignore success here since it's not high priority
-      pBatteryChr->subscribe(pBatteryChr->canNotify(), on_notify);
+  // Update global link state based on active controller
+  auto active_addr = ControllerManager::instance().get_active();
+  if (active_addr.has_value()) {
+    auto *active_state = ControllerManager::instance().get(active_addr.value());
+    if (active_state) {
+      if (active_state->subscribed) {
+        link_state = BleLinkState::Subscribed;
+      } else if (active_state->authenticated) {
+        link_state = BleLinkState::Subscribing;
+      } else {
+        link_state = BleLinkState::Encrypting;
+      }
+      set_link_detail(active_state->link_detail);
     }
   }
-  // and report the controller's name for the paired-controller list
-  if (bond_name_callback) {
-    const NimBLEAddress id = pClient->getConnInfo().getIdAddress();
-    std::array<uint8_t, 6> address{};
-    std::copy(id.getVal(), id.getVal() + address.size(), address.begin());
-    bond_name_callback(address, id.getType(), read_controller_name(pClient));
-  }
+
   return false; // don't stop the timer
 }
 
@@ -688,7 +786,13 @@ void start_ble_pairing_thread(notify_callback_t callback) {
   start_scan(true);
 }
 
-bool is_ble_subscribed() { return subscribed.load(); }
+bool is_ble_subscribed() {
+  auto active = ControllerManager::instance().get_active();
+  if (!active.has_value())
+    return false;
+  auto *state = ControllerManager::instance().get(active.value());
+  return state && state->subscribed;
+}
 
 bool is_ble_scanning() { return NimBLEDevice::getScan()->isScanning(); }
 
@@ -705,20 +809,31 @@ void ble_set_disconnect_callback(disconnect_callback_t callback) {
 }
 
 std::optional<uint8_t> ble_report_id_for(const NimBLERemoteCharacteristic *chr) {
-  std::lock_guard<std::mutex> lk(report_map_mutex);
-  const auto it = report_ids.find(chr);
-  if (it == report_ids.end())
+  auto *state = get_controller_by_characteristic(chr);
+  if (!state)
+    return std::nullopt;
+  const auto it = state->report_ids.find(chr);
+  if (it == state->report_ids.end())
     return std::nullopt;
   return it->second;
 }
 
-uint32_t ble_notification_count() { return notification_count.load(); }
+uint32_t ble_notification_count() {
+  auto active = ControllerManager::instance().get_active();
+  if (!active.has_value())
+    return 0;
+  auto *state = ControllerManager::instance().get(active.value());
+  return state ? state->notification_count : 0;
+}
 
 uint32_t ble_ms_since_last_notification() {
-  const int64_t last = last_notify_us.load();
-  if (last < 0)
+  auto active = ControllerManager::instance().get_active();
+  if (!active.has_value())
     return UINT32_MAX;
-  const int64_t age_ms = (esp_timer_get_time() - last) / 1000;
+  auto *state = ControllerManager::instance().get(active.value());
+  if (!state || state->last_notify_us < 0)
+    return UINT32_MAX;
+  const int64_t age_ms = (esp_timer_get_time() - state->last_notify_us) / 1000;
   return age_ms > static_cast<int64_t>(UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(age_ms);
 }
 

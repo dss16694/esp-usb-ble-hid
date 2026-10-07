@@ -17,6 +17,7 @@
 
 #include "ble.hpp"
 #include "bsp.hpp"
+#include "controller_manager.hpp"
 #include "services.hpp"
 #include "status_led.hpp"
 #include "usb.hpp"
@@ -157,6 +158,24 @@ void notifyCB(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData,
     battery_level_percent = pData[0];
     return;
   }
+
+  // Get the controller address from the characteristic
+  auto *service = pRemoteCharacteristic->getRemoteService();
+  if (!service)
+    return;
+  auto *client = service->getClient();
+  if (!client)
+    return;
+
+  const auto &addr = client->getPeerAddress();
+
+  // Auto-switch to this controller if it has input
+  ControllerManager::instance().auto_switch_on_input(addr);
+
+  // Only forward inputs from the active controller
+  if (!ControllerManager::instance().is_active(addr))
+    return;
+
   // otherwise this is a HID report: which one is told by the characteristic's
   // Report Reference (a controller may notify several input reports); an
   // unknown characteristic is assumed to be the main gamepad input report
