@@ -110,7 +110,7 @@ static ControllerState *get_controller_by_client(NimBLEClient *client) {
 }
 
 // Helper: get controller state from characteristic
-static ControllerState *get_controller_by_characteristic(NimBLERemoteCharacteristic *chr) {
+static ControllerState *get_controller_by_characteristic(const NimBLERemoteCharacteristic *chr) {
   if (!chr || !chr->getRemoteService())
     return nullptr;
   auto *client = chr->getRemoteService()->getClient();
@@ -342,8 +342,6 @@ class ClientCallbacks : public NimBLEClientCallbacks {
       state->authenticated = true;
     }
   }
-    }
-  }
 };
 
 static ClientCallbacks clientCallbacks;
@@ -565,7 +563,6 @@ static bool timer_callback() {
   update_led_connected();
 
   // Process each connected controller
-  bool any_subscribed = false;
   for (auto *pClient : pClients) {
     if (!pClient || !pClient->isConnected())
       continue;
@@ -664,7 +661,6 @@ static bool timer_callback() {
     state->last_notify_us = -1;
     state->subscribed = true;
     state->link_detail = fmt::format("subscribed on attempt {}", attempt);
-    any_subscribed = true;
 
     // Subscribe to battery service if it exists
     if (auto *pBatterySvc = pClient->getService(battery_service_uuid)) {
