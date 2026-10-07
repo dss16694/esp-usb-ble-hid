@@ -116,7 +116,7 @@ CONFIG_TINYUSB_CDC_TX_BUFSIZE=4096
 # USB Configuration: Enable Vendor Interface (WebUSB Console)
 # ========================================
 CONFIG_DONGLE_USB_VENDOR_INTERFACE=y
-# CONFIG_DONGLE_USB_CDC_CONSOLE is not set
+CONFIG_DONGLE_USB_CDC_CONSOLE=y
 
 # ========================================
 # Coredump Configuration

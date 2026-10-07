@@ -1,9 +1,14 @@
 #include "services.hpp"
 
+#include <cerrno>
 #include <chrono>
+#include <fstream>
 #include <memory>
 #include <mutex>
+#include <sstream>
+#include <sys/stat.h>
 
+#include "esp_spiffs.h"
 #include "esp_system.h"
 
 #include "coredump.hpp"
@@ -22,34 +27,124 @@ using namespace std::chrono_literals;
 
 static espp::Logger logger({.tag = "Services", .level = espp::Logger::Verbosity::INFO});
 
-// --- settings persistence (NVS) --------------------------------------------------
+// --- SPIFFS configuration for settings storage -----------------------------------
 
-static constexpr const char *kNvsNamespace = "dongle";
+static constexpr const char *kSpiffsPartition = "user_data";
+static constexpr const char *kSpiffsBasePath = "/spiffs";
+static constexpr const char *kSettingsFile = "/spiffs/settings.json";
+
+static bool init_spiffs() {
+  esp_vfs_spiffs_conf_t conf = {
+    .base_path = kSpiffsBasePath,
+    .partition_label = kSpiffsPartition,
+    .max_files = 5,
+    .format_if_mount_failed = true  // Auto-format if mount fails
+  };
+
+  esp_err_t ret = esp_vfs_spiffs_register(&conf);
+  if (ret != ESP_OK) {
+    logger.error("Failed to mount SPIFFS: {} (0x{:x})", esp_err_to_name(ret), ret);
+
+    // Try to format and retry
+    logger.warn("Attempting to format SPIFFS partition...");
+    ret = esp_spiffs_format(kSpiffsPartition);
+    if (ret != ESP_OK) {
+      logger.error("Failed to format SPIFFS: {}", esp_err_to_name(ret));
+      return false;
+    }
+
+    ret = esp_vfs_spiffs_register(&conf);
+    if (ret != ESP_OK) {
+      logger.error("Failed to mount SPIFFS after format: {}", esp_err_to_name(ret));
+      return false;
+    }
+  }
+
+  size_t total = 0, used = 0;
+  ret = esp_spiffs_info(kSpiffsPartition, &total, &used);
+  if (ret == ESP_OK) {
+    logger.info("SPIFFS: {} KB total, {} KB used", total / 1024, used / 1024);
+  }
+
+  // Verify write capability by creating a test file
+  std::ofstream test_file("/spiffs/.test");
+  if (!test_file.is_open()) {
+    logger.error("SPIFFS mounted but cannot create files - check partition table");
+    return false;
+  }
+  test_file << "test";
+  test_file.close();
+  std::remove("/spiffs/.test");
+
+  logger.info("SPIFFS initialized successfully and writable");
+  return true;
+}
+
+// --- NVS for BLE bond names only -------------------------------------------------
+
 static std::unique_ptr<espp::Nvs> nvs_storage;
+
+// --- settings persistence (SPIFFS) -----------------------------------------------
 
 static device_config::Settings load_settings() {
   device_config::Settings s; // defaults
-  if (!nvs_storage)
+
+  // Try to read from file
+  std::ifstream file(kSettingsFile);
+  if (!file.is_open()) {
+    logger.warn("Settings file not found, using defaults");
     return s;
-  std::error_code ec;
-  // get_or_set_var() writes the default the first time so the namespace is
-  // fully populated after the first boot
-  nvs_storage->get_or_set_var(kNvsNamespace, "inv_ly", s.invert_left_y, s.invert_left_y, ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "inv_ry", s.invert_right_y, s.invert_right_y, ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "swap_ab", s.swap_ab, s.swap_ab, ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "swap_xy", s.swap_xy, s.swap_xy, ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "deadzone", s.deadzone_percent, s.deadzone_percent,
-                              ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "led", s.led_brightness, s.led_brightness, ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "ble_name", s.ble_name, s.ble_name, ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "led_conn", s.led_connected_brightness,
-                              s.led_connected_brightness, ec);
-  nvs_storage->get_or_set_var(kNvsNamespace, "led_blink", s.led_activity_blink,
-                              s.led_activity_blink, ec);
-  if (ec)
-    logger.warn("Could not read all settings from NVS: {}", ec.message());
-  // never trust stored values blindly (an older firmware may have stored
-  // something this one rejects)
+  }
+
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  std::string json = buffer.str();
+  file.close();
+
+  // Parse JSON (simple key-value pairs)
+  // Format: {"swap_ab":1,"swap_xy":0,"deadzone":10,...}
+  auto parse_bool = [&](const std::string &key) -> bool {
+    size_t pos = json.find("\"" + key + "\":");
+    if (pos != std::string::npos) {
+      char val = json[pos + key.length() + 3];
+      return (val == '1' || val == 't');
+    }
+    return false;
+  };
+
+  auto parse_int = [&](const std::string &key) -> int {
+    size_t pos = json.find("\"" + key + "\":");
+    if (pos != std::string::npos) {
+      size_t start = pos + key.length() + 3;
+      size_t end = json.find_first_of(",}", start);
+      return std::stoi(json.substr(start, end - start));
+    }
+    return 0;
+  };
+
+  auto parse_string = [&](const std::string &key) -> std::string {
+    size_t pos = json.find("\"" + key + "\":\"");
+    if (pos != std::string::npos) {
+      size_t start = pos + key.length() + 4;
+      size_t end = json.find("\"", start);
+      return json.substr(start, end - start);
+    }
+    return "";
+  };
+
+  s.invert_left_y = parse_bool("inv_ly");
+  s.invert_right_y = parse_bool("inv_ry");
+  s.swap_ab = parse_bool("swap_ab");
+  s.swap_xy = parse_bool("swap_xy");
+  s.deadzone_percent = parse_int("deadzone");
+  s.led_brightness = parse_int("led");
+  s.ble_name = parse_string("ble_name");
+  s.led_connected_brightness = parse_int("led_conn");
+  s.led_activity_blink = parse_bool("led_blink");
+
+  logger.info("Settings loaded from file: swap_ab={}, swap_xy={}, deadzone={}",
+              s.swap_ab, s.swap_xy, s.deadzone_percent);
+
   if (auto why = s.validate(); !why.empty()) {
     logger.warn("Stored settings invalid ({}); using defaults", why);
     s = device_config::Settings{};
@@ -58,36 +153,86 @@ static device_config::Settings load_settings() {
 }
 
 static bool save_settings(const device_config::Settings &s, std::string &error) {
-  if (!nvs_storage) {
-    error = "NVS is not initialized";
-    return false;
-  }
-  // Stage every key on one handle and commit once, so a failure part-way
-  // through never leaves a half-applied set of settings for the next boot.
-  std::error_code ec;
-  auto handle = nvs_storage->get_handle(kNvsNamespace, ec);
-  auto stage = [&](const char *key, auto value) {
-    if (!ec)
-      handle.set(key, value, ec);
-  };
-  stage("inv_ly", s.invert_left_y);
-  stage("inv_ry", s.invert_right_y);
-  stage("swap_ab", s.swap_ab);
-  stage("swap_xy", s.swap_xy);
-  stage("deadzone", s.deadzone_percent);
-  stage("led", s.led_brightness);
-  stage("ble_name", s.ble_name);
-  stage("led_conn", s.led_connected_brightness);
-  stage("led_blink", s.led_activity_blink);
-  if (!ec)
-    handle.commit(ec);
-  if (ec) {
-    // uncommitted writes are discarded with the handle: nothing was persisted
-    error = "could not save settings to NVS: " + ec.message();
+  // Build JSON string
+  std::string json = fmt::format(
+    "{{"
+    "\"inv_ly\":{},"
+    "\"inv_ry\":{},"
+    "\"swap_ab\":{},"
+    "\"swap_xy\":{},"
+    "\"deadzone\":{},"
+    "\"led\":{},"
+    "\"ble_name\":\"{}\","
+    "\"led_conn\":{},"
+    "\"led_blink\":{}"
+    "}}",
+    s.invert_left_y ? 1 : 0,
+    s.invert_right_y ? 1 : 0,
+    s.swap_ab ? 1 : 0,
+    s.swap_xy ? 1 : 0,
+    s.deadzone_percent,
+    s.led_brightness,
+    s.ble_name,
+    s.led_connected_brightness,
+    s.led_activity_blink ? 1 : 0
+  );
+
+  // Write to file
+  std::ofstream file(kSettingsFile, std::ios::out | std::ios::trunc);
+  if (!file.is_open()) {
+    // Provide more diagnostic info
+    struct stat st;
+    bool dir_exists = (stat(kSpiffsBasePath, &st) == 0);
+    logger.error("Failed to open {} for writing. SPIFFS dir exists: {}", kSettingsFile, dir_exists);
+
+    // Try to check SPIFFS status
+    size_t total = 0, used = 0;
+    esp_err_t info_ret = esp_spiffs_info(kSpiffsPartition, &total, &used);
+    if (info_ret == ESP_OK) {
+      logger.error("SPIFFS status: {} KB total, {} KB used", total / 1024, used / 1024);
+    } else {
+      logger.error("Cannot get SPIFFS info: {}", esp_err_to_name(info_ret));
+    }
+
+    error = fmt::format("Failed to open settings file for writing (errno: {})", errno);
     logger.error("{}", error);
     return false;
   }
-  logger.info("Settings saved");
+
+  file << json;
+  bool write_ok = file.good();
+  file.close();
+
+  if (!write_ok) {
+    error = "Failed to write settings to file";
+    logger.error("{}", error);
+    return false;
+  }
+
+  // Sync is handled by the VFS layer automatically on close
+  // No need for explicit esp_spiffs_sync in newer ESP-IDF versions
+
+  // Verify: read back immediately
+  std::ifstream verify_file(kSettingsFile);
+  if (!verify_file.is_open()) {
+    error = "VERIFICATION FAILED: could not read back settings file";
+    logger.error("{}", error);
+    return false;
+  }
+
+  std::stringstream buffer;
+  buffer << verify_file.rdbuf();
+  std::string verify_json = buffer.str();
+  verify_file.close();
+
+  if (verify_json != json) {
+    error = "VERIFICATION FAILED: readback mismatch";
+    logger.error("{}", error);
+    return false;
+  }
+
+  logger.warn("✅ Settings saved and verified: swap_ab={}, swap_xy={}, deadzone={}",
+              s.swap_ab, s.swap_xy, s.deadzone_percent);
   return true;
 }
 
@@ -156,7 +301,15 @@ static std::string crash_report;
 // --- public API -----------------------------------------------------------------------
 
 void services_init(espp::DispatcherWorker *link, const ServicesCallbacks &callbacks) {
-  // NVS (settings + BLE bonds live here)
+  // SPIFFS (settings storage)
+  logger.warn("🔄 Initializing SPIFFS...");
+  if (!init_spiffs()) {
+    logger.error("❌ SPIFFS init failed - settings will NOT persist!");
+  } else {
+    logger.warn("✅ SPIFFS mounted successfully");
+  }
+
+  // NVS (BLE bonds only)
   nvs_storage = std::make_unique<espp::Nvs>();
   std::error_code ec;
   nvs_storage->init(ec);

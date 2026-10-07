@@ -170,8 +170,8 @@ private:
 struct Settings {
   bool invert_left_y{true};
   bool invert_right_y{true};
-  bool swap_ab{false};
-  bool swap_xy{false};
+  bool swap_ab{true};
+  bool swap_xy{true};
   uint8_t deadzone_percent{0};
   uint8_t led_brightness{100};
   std::string ble_name{"Switch"};
