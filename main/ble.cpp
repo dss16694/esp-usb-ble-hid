@@ -610,7 +610,6 @@ static bool timer_callback() {
     }
 
     if (state->subscribed) {
-      any_subscribed = true;
       continue; // already fully set up
     }
 
