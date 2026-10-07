@@ -1,38 +1,90 @@
+# ========================================
+# ESP32-S3 N16R8 (16MB Flash + 8MB PSRAM) Configuration
+# For boards WITHOUT display (e.g., SuperMini ESP32-S3)
+# ========================================
+
 CONFIG_IDF_TARGET="esp32s3"
 
+# ========================================
+# Hardware Target: QT Py (No Display)
+# ========================================
+CONFIG_TARGET_HARDWARE_QTPY_ESP32_S3=y
+# CONFIG_TARGET_HARDWARE_T3_DONGLE is not set
+
+# ========================================
+# Flash Configuration: 16MB
+# ========================================
+# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# Flash mode and speed
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# ========================================
+# PSRAM Configuration: 8MB OPI PSRAM
+# ========================================
+CONFIG_ESP32S3_SPIRAM_SUPPORT=y
+CONFIG_SPIRAM=y
+
+# PSRAM Type: Octal (OPI) for R8 chips
+CONFIG_SPIRAM_MODE_OCT=y
+# CONFIG_SPIRAM_MODE_QUAD is not set
+
+# PSRAM Speed: 80MHz
+CONFIG_SPIRAM_SPEED_80M=y
+
+# PSRAM Size: 8MB
+CONFIG_SPIRAM_SIZE=8388608
+
+# PSRAM Allocation Strategy: Use PSRAM for large allocations
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+
+# Allow BSS segment in PSRAM (saves internal RAM)
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# Memory allocator: Best fit (recommended for mixed usage)
+CONFIG_SPIRAM_MEMTEST=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# ========================================
+# CPU and FreeRTOS Configuration
+# ========================================
 CONFIG_FREERTOS_HZ=1000
-# task table for the monitor service (espp::MonitorService GET_TASKS)
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
-
-# ESP32-specific
-#
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
 
-# Common ESP-related
-#
+# ========================================
+# Task Stack Sizes (increased for PSRAM availability)
+# ========================================
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_TIMER_TASK_STACK_SIZE=8192
 
-# Partition Table (nvs + otadata + two OTA app slots + coredump)
+# ========================================
+# Partition Table: Custom for 16MB Flash
+# ========================================
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
-CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_16mb.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
 CONFIG_PARTITION_TABLE_MD5=y
 
-# OTA: a freshly updated image boots PENDING_VERIFY and is rolled back on the
-# next reset unless the host confirms it from the dongle console.
+# ========================================
+# OTA Configuration
+# ========================================
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
-#
-# BT config
-#
+# ========================================
+# Bluetooth Configuration
+# ========================================
 CONFIG_BT_ENABLED=y
 CONFIG_BT_BLUEDROID_ENABLED=n
 CONFIG_BT_NIMBLE_ENABLED=y
@@ -41,27 +93,17 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_GAP_DEVICE_NAME_MAX_LEN=100
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
 
-# set the bonding configuration to configure the max number of bonded devices
-# that can be remembered.
-#
-# NOTE: the MAX_CCCDS must be AT LEAST 6 * MAX_BONDS, otherwise the number of
-# bonded devices allowed will be limited by the number of CCCDs / 6. The factor
-# is determined by the number of notifications and indications that can be
-# stored for each bonded device. For this reason, we've set max CCCDs to be very
-# large so that they are not the limit.
+# Bonding Configuration
 CONFIG_BT_NIMBLE_MAX_BONDS=5
 CONFIG_BT_NIMBLE_MAX_CCCDS=128
 
-# Set the ESP-NIMBLE-CPP Config
+# ESP-NIMBLE-CPP Config
 CONFIG_NIMBLE_CPP_LOG_LEVEL_NONE=y
 
-#
-# TinyUSB config (espp usb_device: HID gamepad + vendor/WebUSB console stream;
-# the CDC class must be compiled in for usb_device even when no CDC function is
-# configured -- it is only added to the descriptor with DONGLE_USB_CDC_CONSOLE)
-#
+# ========================================
+# TinyUSB Configuration
+# ========================================
 CONFIG_TINYUSB_HID_COUNT=1
-# the Switch Pro reports are 64 bytes (the default 16 truncates them)
 CONFIG_TINYUSB_HID_BUFSIZE=64
 CONFIG_TINYUSB_VENDOR_COUNT=1
 CONFIG_TINYUSB_VENDOR_RX_BUFSIZE=4096
@@ -70,9 +112,32 @@ CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_CDC_COUNT=1
 CONFIG_TINYUSB_CDC_TX_BUFSIZE=4096
 
-# Coredump support (to the coredump partition, ELF format, readable over USB
-# from the dongle console)
+# ========================================
+# USB Configuration: Enable Vendor Interface (WebUSB Console)
+# ========================================
+CONFIG_DONGLE_USB_VENDOR_INTERFACE=y
+# CONFIG_DONGLE_USB_CDC_CONSOLE is not set
+
+# ========================================
+# Coredump Configuration
+# ========================================
 CONFIG_ESP_COREDUMP_ENABLE=y
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# ========================================
+# NVS Configuration (ensure sufficient space)
+# ========================================
+CONFIG_NVS_ENCRYPTION=n
+
+# ========================================
+# Logging Configuration
+# ========================================
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# ========================================
+# Compiler Optimization
+# ========================================
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
