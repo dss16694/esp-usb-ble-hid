@@ -1,0 +1,167 @@
+name: Build for N16R8 Board
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  APP_NAME: 'ESP USB BLE HID'
+  IDF_TARGET: 'esp32s3'
+  IDF_VERSION: 'v6.1'
+  IDF_COMPONENT_MANAGER: "1"
+  FLASH_TOTAL_OVERRIDE: '6291456'  # 6MB: one OTA app slot for 16MB flash
+
+jobs:
+  build-n16r8:
+    name: Build for N16R8 (16MB Flash + 8MB PSRAM, No Display)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Setup ESP-IDF
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        target: ${{ env.IDF_TARGET }}
+        path: '.'
+        # Use custom sdkconfig for N16R8
+        command: |
+          . ${IDF_PATH}/export.sh
+          rm -f sdkconfig
+          cp sdkconfig.n16r8 sdkconfig.defaults
+          idf.py set-target esp32s3
+          idf.py build
+
+    - name: Verify build artifacts
+      run: |
+        echo "=== Build Output Files ==="
+        ls -lh build/*.bin
+        echo ""
+        echo "=== Partition Information ==="
+        cat build/partition_table/partition-table.bin | od -An -tx1 -v | head -20 || true
+        echo ""
+        echo "=== Binary Sizes ==="
+        ls -lh build/bootloader/bootloader.bin
+        ls -lh build/partition_table/partition-table.bin
+        ls -lh build/ota_data_initial.bin
+        ls -lh build/esp-usb-ble-hid.bin
+        echo ""
+        echo "=== Memory Usage Summary ==="
+        cat build/esp-usb-ble-hid.map | grep -A 20 "Memory Configuration" || true
+
+    - name: Create firmware package
+      run: |
+        mkdir -p firmware_n16r8
+        cp build/bootloader/bootloader.bin firmware_n16r8/
+        cp build/partition_table/partition-table.bin firmware_n16r8/
+        cp build/ota_data_initial.bin firmware_n16r8/
+        cp build/esp-usb-ble-hid.bin firmware_n16r8/
+        cp partitions_16mb.csv firmware_n16r8/
+
+        # Create flash command script
+        cat > firmware_n16r8/FLASH_INSTRUCTIONS.txt << 'EOF'
+        ========================================
+        ESP32-S3 N16R8 Firmware Flash Instructions
+        ========================================
+
+        Board: ESP32-S3 with 16MB Flash (N16) + 8MB OPI PSRAM (R8)
+        Target: No display version (SuperMini / Generic ESP32-S3 dev board)
+
+        === Using esptool.py ===
+
+        1. Install esptool:
+           pip install esptool
+
+        2. Flash command (replace /dev/ttyUSB0 with your port):
+           esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
+             --before default_reset --after hard_reset write_flash \
+             0x0 bootloader.bin \
+             0x8000 partition-table.bin \
+             0x11000 ota_data_initial.bin \
+             0x20000 esp-usb-ble-hid.bin
+
+        3. For Windows (COM port):
+           esptool.py --chip esp32s3 --port COM3 --baud 921600 ^
+             --before default_reset --after hard_reset write_flash ^
+             0x0 bootloader.bin ^
+             0x8000 partition-table.bin ^
+             0x11000 ota_data_initial.bin ^
+             0x20000 esp-usb-ble-hid.bin
+
+        === Using ESP-IDF (idf.py) ===
+
+        idf.py -p /dev/ttyUSB0 flash
+
+        === Verify PSRAM Detection ===
+
+        After flashing, connect to the serial monitor:
+        - You should see "PSRAM: 8192 KB" or similar during boot
+        - System console should show available heap > 8MB
+        - No more "PSRAM none" errors
+
+        === Troubleshooting ===
+
+        If flash fails:
+        1. Hold BOOT button while connecting USB
+        2. Try lower baud rate: --baud 115200
+        3. Erase flash first: esptool.py --chip esp32s3 --port <PORT> erase_flash
+
+        ========================================
+        EOF
+
+        # Create merge binary for single-file flashing
+        cd firmware_n16r8
+        python -m esptool --chip esp32s3 merge_bin \
+          -o esp-usb-ble-hid_n16r8_full.bin \
+          --flash_mode dio --flash_freq 80m --flash_size 16MB \
+          0x0 bootloader.bin \
+          0x8000 partition-table.bin \
+          0x11000 ota_data_initial.bin \
+          0x20000 esp-usb-ble-hid.bin || true
+        cd ..
+
+        echo "=== Firmware Package Contents ==="
+        ls -lh firmware_n16r8/
+
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-n16r8-${{ github.sha }}
+        path: firmware_n16r8/
+        retention-days: 30
+
+    - name: Generate flash command summary
+      run: |
+        echo "### ✅ Build Successful for N16R8 Board" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Flash: 16MB" >> $GITHUB_STEP_SUMMARY
+        echo "- PSRAM: 8MB OPI" >> $GITHUB_STEP_SUMMARY
+        echo "- Display: Disabled" >> $GITHUB_STEP_SUMMARY
+        echo "- Hardware: Adafruit QT Py ESP32-S3 (compatible)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Quick Flash Command:**" >> $GITHUB_STEP_SUMMARY
+        echo '```bash' >> $GITHUB_STEP_SUMMARY
+        echo 'esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \' >> $GITHUB_STEP_SUMMARY
+        echo '  write_flash 0x0 bootloader.bin 0x8000 partition-table.bin \' >> $GITHUB_STEP_SUMMARY
+        echo '  0x11000 ota_data_initial.bin 0x20000 esp-usb-ble-hid.bin' >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+    - name: Check memory usage
+      continue-on-error: true
+      run: |
+        echo "=== DRAM Usage ==="
+        grep -A 5 "DRAM" build/esp-usb-ble-hid.map | head -10 || true
+        echo ""
+        echo "=== IRAM Usage ==="
+        grep -A 5 "IRAM" build/esp-usb-ble-hid.map | head -10 || true
+        echo ""
+        echo "=== Flash Usage ==="
+        grep -A 5 "flash" build/esp-usb-ble-hid.map | head -10 || true

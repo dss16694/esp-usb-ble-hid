@@ -1,0 +1,19 @@
+# ========================================
+# Partition Table for 16MB Flash
+# Optimized for ESP32-S3 N16R8 boards
+# ========================================
+# Name,      Type, SubType,  Offset,   Size,     Flags
+# NVS: Increased to 32KB for more reliable storage
+nvs,         data, nvs,      0x9000,   0x8000,
+# OTA data
+otadata,     data, ota,      0x11000,  0x2000,
+# PHY init data
+phy_init,    data, phy,      0x13000,  0x1000,
+# OTA_0: 6MB for first app slot
+ota_0,       app,  ota_0,    0x20000,  0x600000,
+# OTA_1: 6MB for second app slot
+ota_1,       app,  ota_1,    0x620000, 0x600000,
+# Coredump: 256KB
+coredump,    data, coredump, 0xC20000, 0x40000,
+# User data storage: ~3.2MB remaining space for future use
+user_data,   data, spiffs,   0xC60000, 0x3A0000,

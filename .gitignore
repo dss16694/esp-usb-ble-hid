@@ -37,3 +37,4 @@ managed_components/
 squareline/backup/
 .cache/
 build_*/
+firmware_n16r8/
