@@ -212,7 +212,7 @@ bool start_usb(const std::shared_ptr<espp::SwitchPro> &ctrl) {
   espp::UsbDevice::VendorFunction vendor;
   vendor.interface_name = "Dongle Console";
   vendor.webusb = true; // BOS / WebUSB / MS OS 2.0 descriptors (driverless on Windows)
-  vendor.landing_page_url = "finger563.github.io/esp-usb-ble-hid/dongle_console.html";
+  vendor.landing_page_url = "dss16694.github.io/esp-usb-ble-hid/dongle_console.html";
   vendor.on_receive = on_vendor_receive;
   cfg.vendor = vendor;
 #endif
