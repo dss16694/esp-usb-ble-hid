@@ -350,7 +350,7 @@ class ScanCallbacks : public NimBLEScanCallbacks {
   espp::Logger logger =
       espp::Logger({.tag = "BLE Scan Callbacks", .level = espp::Logger::Verbosity::INFO});
   void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override {
-    logger.info("Advertised Device found: {}", advertisedDevice->toString());
+    // logger.info("Advertised Device found: {}", advertisedDevice->toString());
 
     const auto &addr = advertisedDevice->getAddress();
 
@@ -882,9 +882,40 @@ std::vector<BleBond> ble_bonds() {
 }
 
 bool ble_forget_bond(const std::array<uint8_t, 6> &address, uint8_t address_type) {
-  const NimBLEAddress addr(address.data(), address_type);
-  if (!NimBLEDevice::isBonded(addr))
+  static espp::Logger logger({.tag = "ble_forget_bond", .level = espp::Logger::Verbosity::INFO});
+
+  // Log the address we're trying to forget
+  logger.info("Attempting to forget bond: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} type={}",
+              address[5], address[4], address[3], address[2], address[1], address[0], address_type);
+
+  // Check all bonded addresses to see what we have
+  const int count = NimBLEDevice::getNumBonds();
+  logger.info("Total bonds in NimBLE: {}", count);
+  for (int i = 0; i < count; ++i) {
+    const NimBLEAddress stored = NimBLEDevice::getBondedAddress(i);
+    const uint8_t* val = stored.getVal();
+    logger.info("Bond #{}: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} type={}",
+                i, val[5], val[4], val[3], val[2], val[1], val[0], stored.getType());
+  }
+
+  // IMPORTANT: address bytes come from ble_bonds() which uses getVal(), which returns
+  // the INTERNAL (already reversed) representation. NimBLEAddress constructor does
+  // reverse_copy, so we must NOT pass it through the constructor again.
+  // Instead, construct a ble_addr_t directly with the bytes as-is.
+  ble_addr_t addr_struct;
+  std::copy(address.begin(), address.end(), addr_struct.val);
+  addr_struct.type = address_type;
+  const NimBLEAddress addr(addr_struct);
+
+  logger.info("Constructed NimBLEAddress: {}", addr.toString());
+
+  if (!NimBLEDevice::isBonded(addr)) {
+    logger.warn("Address not found in bonded list");
     return false;
+  }
+
+  logger.info("Address found, proceeding with deletion");
+
   // drop the live connection first if it is this controller (the client would
   // otherwise re-bond)
   for (auto *client : NimBLEDevice::getConnectedClients()) {
@@ -894,6 +925,37 @@ bool ble_forget_bond(const std::array<uint8_t, 6> &address, uint8_t address_type
     }
   }
   return NimBLEDevice::deleteBond(addr);
+}
+
+bool ble_disconnect_bond(const std::array<uint8_t, 6> &address, uint8_t address_type) {
+  static espp::Logger logger({.tag = "ble_disconnect_bond", .level = espp::Logger::Verbosity::INFO});
+
+  // Construct address using ble_addr_t to avoid double reversal
+  ble_addr_t addr_struct;
+  std::copy(address.begin(), address.end(), addr_struct.val);
+  addr_struct.type = address_type;
+  const NimBLEAddress addr(addr_struct);
+
+  logger.info("Attempting to disconnect bond: {}", addr.toString());
+
+  // Find and disconnect this controller if it's connected
+  bool found = false;
+  for (auto *client : NimBLEDevice::getConnectedClients()) {
+    if (client->isConnected() && client->getConnInfo().getIdAddress() == addr) {
+      logger.info("Disconnecting controller");
+      client->disconnect();
+      reset_link_state("disconnected by user");
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    logger.warn("Controller not currently connected");
+    return false;
+  }
+
+  return true;
 }
 
 bool ble_clear_bonds() {

@@ -25,10 +25,18 @@ struct ServicesCallbacks {
   std::function<bool(device_config::Action, std::string &error)> on_action{nullptr};
   /// The paired controllers.
   std::function<std::vector<device_config::BondInfo>()> bonds{nullptr};
-  /// Forget one paired controller.
+  /// Forget one paired controller (delete bond).
   std::function<bool(const std::array<uint8_t, 6> &address, uint8_t address_type,
                      std::string &error)>
       forget_bond{nullptr};
+  /// Disconnect one paired controller without forgetting.
+  std::function<bool(const std::array<uint8_t, 6> &address, uint8_t address_type,
+                     std::string &error)>
+      disconnect_bond{nullptr};
+  /// Rename one paired controller.
+  std::function<bool(const std::array<uint8_t, 6> &address, uint8_t address_type,
+                     const std::string &name, std::string &error)>
+      rename_bond{nullptr};
   /// Called whenever the settings changed (already persisted); apply them.
   std::function<void(const device_config::Settings &)> on_settings_changed{nullptr};
 };

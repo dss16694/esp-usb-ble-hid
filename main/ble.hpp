@@ -71,6 +71,9 @@ void ble_set_bond_name_callback(bond_name_callback_t callback);
 /// Forget one bond (disconnecting it first if it is the connected controller).
 /// Returns false if no such bond exists.
 bool ble_forget_bond(const std::array<uint8_t, 6> &address, uint8_t address_type);
+/// Disconnect one bond without forgetting it (controller can reconnect).
+/// Returns false if no such bond exists or not connected.
+bool ble_disconnect_bond(const std::array<uint8_t, 6> &address, uint8_t address_type);
 /// Disconnect any connected controller and forget every bond. Returns false if
 /// the bond store could not be cleared (bonds may remain).
 bool ble_clear_bonds();

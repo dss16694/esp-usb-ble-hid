@@ -302,6 +302,36 @@ static bool device_forget_bond(const std::array<uint8_t, 6> &address, uint8_t ad
   return true;
 }
 
+static bool device_disconnect_bond(const std::array<uint8_t, 6> &address, uint8_t address_type,
+                                   std::string &error) {
+  if (!ble_disconnect_bond(address, address_type)) {
+    error = "controller not connected";
+    return false;
+  }
+  return true;
+}
+
+static bool device_rename_bond(const std::array<uint8_t, 6> &address, uint8_t address_type,
+                               const std::string &name, std::string &error) {
+  // Check if the bond exists
+  bool found = false;
+  for (const auto &b : ble_bonds()) {
+    if (b.address == address && b.address_type == address_type) {
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    error = "no such paired controller";
+    return false;
+  }
+
+  // Store the custom name
+  services_set_bond_name(address, name);
+  return true;
+}
+
 static void apply_settings(const device_config::Settings &s) {
   set_led_brightness_percent(s.led_brightness);
   set_led_connected_brightness_percent(s.led_connected_brightness);
@@ -359,6 +389,8 @@ extern "C" void app_main(void) {
                               .on_action = device_action,
                               .bonds = device_bonds,
                               .forget_bond = device_forget_bond,
+                              .disconnect_bond = device_disconnect_bond,
+                              .rename_bond = device_rename_bond,
                               .on_settings_changed = apply_settings});
   const auto settings = services_settings();
   apply_settings(settings);
@@ -394,7 +426,10 @@ extern "C" void app_main(void) {
   // remember each controller's name so the console can list it by name
   ble_set_bond_name_callback(
       [](const std::array<uint8_t, 6> &address, uint8_t, const std::string &name) {
-        services_set_bond_name(address, name);
+        // Only save the device-reported name if user hasn't set a custom name
+        if (services_bond_name(address).empty()) {
+          services_set_bond_name(address, name);
+        }
       });
   // when the controller goes away (powered off, out of range, ...), release
   // every button and center the sticks: the Switch would otherwise keep seeing

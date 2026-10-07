@@ -20,7 +20,9 @@
 //   0x04 RESET_SETTINGS(no payload)      0x84 ERROR     [request u8][code u32][utf8 message]
 //   0x05 ACTION        [action u8]       0x85 BONDS     (see serialize_bonds)
 //   0x06 GET_BONDS     (no payload)
-//   0x07 FORGET_BOND   [addr 6B][type u8]
+//   0x07 FORGET_BOND   [addr 6B][type u8]  (delete bond and disconnect)
+//   0x08 DISCONNECT_BOND [addr 6B][type u8]  (disconnect without deleting bond)
+//   0x09 RENAME_BOND   [addr 6B][type u8][name str]  (set custom name for bond)
 //
 // SET_SETTINGS carries the same TLV list as SETTINGS and may be *partial*: only
 // the keys present are changed. On success the device replies OK and then a
@@ -62,6 +64,8 @@ enum class Msg : uint8_t {
   Action = 0x05,
   GetBonds = 0x06,
   ForgetBond = 0x07,
+  DisconnectBond = 0x08,
+  RenameBond = 0x09,
   // replies (request | 0x80)
   Info = 0x81,
   Settings = 0x82,
@@ -506,6 +510,41 @@ parse_forget_bond_payload(std::span<const uint8_t> payload) {
   std::copy(payload.begin(), payload.begin() + kBondAddressSize, address.begin());
   return std::make_pair(address, payload[kBondAddressSize]);
 }
+
+/// DISCONNECT_BOND payload: [addr 6B][type u8] (same as FORGET_BOND)
+inline std::vector<uint8_t> make_disconnect_bond_payload(const std::array<uint8_t, 6> &address,
+                                                         uint8_t address_type) {
+  return make_forget_bond_payload(address, address_type);
+}
+
+inline std::optional<std::pair<std::array<uint8_t, 6>, uint8_t>>
+parse_disconnect_bond_payload(std::span<const uint8_t> payload) {
+  return parse_forget_bond_payload(payload);
+}
+
+/// RENAME_BOND payload: [addr 6B][type u8][name str]
+inline std::vector<uint8_t> make_rename_bond_payload(const std::array<uint8_t, 6> &address,
+                                                     uint8_t address_type,
+                                                     std::string_view name) {
+  std::vector<uint8_t> out(address.begin(), address.end());
+  put_u8(out, address_type);
+  put_str(out, name);
+  return out;
+}
+
+inline std::optional<std::tuple<std::array<uint8_t, 6>, uint8_t, std::string>>
+parse_rename_bond_payload(std::span<const uint8_t> payload) {
+  Reader r(payload);
+  const auto addr = r.bytes(kBondAddressSize);
+  const auto type = r.u8();
+  const auto name = r.str();
+  if (!addr || !type || !name)
+    return std::nullopt;
+  std::array<uint8_t, 6> address{};
+  std::copy(addr->begin(), addr->end(), address.begin());
+  return std::make_tuple(address, *type, *name);
+}
+
 
 // ---- OK / ERROR ------------------------------------------------------------------
 

@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <chrono>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -16,7 +17,6 @@
 #include "format.hpp"
 #include "logger.hpp"
 #include "monitor_service.hpp"
-#include "nvs.hpp"
 #include "ota.hpp"
 #include "ota_service.hpp"
 #include "system_service.hpp"
@@ -32,6 +32,7 @@ static espp::Logger logger({.tag = "Services", .level = espp::Logger::Verbosity:
 static constexpr const char *kSpiffsPartition = "user_data";
 static constexpr const char *kSpiffsBasePath = "/spiffs";
 static constexpr const char *kSettingsFile = "/spiffs/settings.json";
+static constexpr const char *kBondNamesFile = "/spiffs/bond_names.json";
 
 static bool init_spiffs() {
   esp_vfs_spiffs_conf_t conf = {
@@ -80,9 +81,13 @@ static bool init_spiffs() {
   return true;
 }
 
-// --- NVS for BLE bond names only -------------------------------------------------
+// --- Bond names persistence (SPIFFS) ----------------------------------------------
+//
+// Stored as JSON: {"MAC_ADDRESS": "Custom Name", ...}
+// MAC address format: lowercase 12-hex without separators (e.g., "a1b2c3d4e5f6")
 
-static std::unique_ptr<espp::Nvs> nvs_storage;
+static std::mutex bond_names_mutex;
+static std::map<std::string, std::string> bond_names_cache;
 
 // --- settings persistence (SPIFFS) -----------------------------------------------
 
@@ -236,52 +241,138 @@ static bool save_settings(const device_config::Settings &s, std::string &error) 
   return true;
 }
 
-// --- paired-controller names (NVS) --------------------------------------------------
-//
-// One namespace, one key per bond: the 12-hex-digit address (NVS keys are
-// limited to 15 characters). Values are the controller's name (<= 31 chars).
-
-static constexpr const char *kBondNamesNamespace = "bondnames";
+// --- Bond names helper functions --------------------------------------------------
 
 static std::string bond_key(const std::array<uint8_t, 6> &address) {
   return fmt::format("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}", address[0], address[1], address[2],
                      address[3], address[4], address[5]);
 }
 
+static void load_bond_names() {
+  std::lock_guard<std::mutex> lock(bond_names_mutex);
+  bond_names_cache.clear();
+
+  logger.info("Loading bond names from {}", kBondNamesFile);
+
+  std::ifstream file(kBondNamesFile);
+  if (!file.is_open()) {
+    logger.info("Bond names file not found, starting with empty cache");
+    return;
+  }
+
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  std::string content = buffer.str();
+  if (content.empty()) {
+    logger.warn("Bond names file is empty");
+    return;
+  }
+
+  logger.info("Bond names file content: {}", content);
+
+  // Simple JSON parsing: {"mac1": "name1", "mac2": "name2"}
+  size_t pos = 0;
+  while ((pos = content.find("\"", pos)) != std::string::npos) {
+    size_t key_start = pos + 1;
+    size_t key_end = content.find("\"", key_start);
+    if (key_end == std::string::npos) break;
+
+    std::string key = content.substr(key_start, key_end - key_start);
+
+    pos = content.find(":", key_end);
+    if (pos == std::string::npos) break;
+
+    pos = content.find("\"", pos);
+    if (pos == std::string::npos) break;
+
+    size_t value_start = pos + 1;
+    size_t value_end = content.find("\"", value_start);
+    if (value_end == std::string::npos) break;
+
+    std::string value = content.substr(value_start, value_end - value_start);
+    bond_names_cache[key] = value;
+    logger.info("Loaded bond name: key='{}', name='{}'", key, value);
+
+    pos = value_end + 1;
+  }
+  logger.info("Loaded {} bond names from SPIFFS", bond_names_cache.size());
+}
+
+static void save_bond_names() {
+  std::lock_guard<std::mutex> lock(bond_names_mutex);
+
+  std::ofstream file(kBondNamesFile);
+  if (!file.is_open()) {
+    logger.error("Failed to open bond names file for writing");
+    return;
+  }
+
+  file << "{";
+  bool first = true;
+  for (const auto &[mac, name] : bond_names_cache) {
+    if (!first) file << ",";
+    file << "\"" << mac << "\":\"" << name << "\"";
+    first = false;
+  }
+  file << "}";
+
+  file.close();
+  logger.info("Saved {} bond names to SPIFFS", bond_names_cache.size());
+}
+
 std::string services_bond_name(const std::array<uint8_t, 6> &address) {
-  if (!nvs_storage)
-    return {};
-  std::string name;
-  std::error_code ec;
-  nvs_storage->get_var(kBondNamesNamespace, bond_key(address), name, ec);
-  return ec ? std::string{} : name; // not found = unknown
+  std::lock_guard<std::mutex> lock(bond_names_mutex);
+  const std::string key = bond_key(address);
+  auto it = bond_names_cache.find(key);
+  std::string result = (it != bond_names_cache.end()) ? it->second : std::string{};
+  logger.info("services_bond_name: address={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}, key={}, result='{}'",
+              address[0], address[1], address[2], address[3], address[4], address[5], key, result);
+  return result;
 }
 
 void services_set_bond_name(const std::array<uint8_t, 6> &address, const std::string &name) {
-  if (!nvs_storage || name.empty())
+  if (name.empty())
     return;
-  if (services_bond_name(address) == name)
-    return; // unchanged: spare the flash
-  std::error_code ec;
-  nvs_storage->set_var(kBondNamesNamespace, bond_key(address), name, ec);
-  if (ec)
-    logger.warn("Could not store controller name '{}': {}", name, ec.message());
-  else
-    logger.info("Stored controller name '{}'", name);
+
+  const std::string key = bond_key(address);
+
+  logger.info("services_set_bond_name: address={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}, key={}, name='{}'",
+              address[0], address[1], address[2], address[3], address[4], address[5], key, name);
+
+  {
+    std::lock_guard<std::mutex> lock(bond_names_mutex);
+    if (bond_names_cache[key] == name)
+      return; // unchanged: spare the flash
+    bond_names_cache[key] = name;
+  }
+
+  save_bond_names();
+  logger.info("Stored controller name '{}' with key '{}'", name, key);
 }
 
 void services_forget_bond_name(const std::array<uint8_t, 6> &address) {
-  if (!nvs_storage)
-    return;
-  std::error_code ec;
-  nvs_storage->erase(kBondNamesNamespace, bond_key(address), ec); // missing key is fine
+  const std::string key = bond_key(address);
+
+  {
+    std::lock_guard<std::mutex> lock(bond_names_mutex);
+    auto it = bond_names_cache.find(key);
+    if (it == bond_names_cache.end())
+      return; // not found, nothing to do
+    bond_names_cache.erase(it);
+  }
+
+  save_bond_names();
+  logger.info("Removed controller name for {}", key);
 }
 
 void services_clear_bond_names() {
-  if (!nvs_storage)
-    return;
-  std::error_code ec;
-  nvs_storage->erase(kBondNamesNamespace, ec);
+  {
+    std::lock_guard<std::mutex> lock(bond_names_mutex);
+    bond_names_cache.clear();
+  }
+
+  save_bond_names();
+  logger.info("Cleared all controller names");
 }
 
 // --- service instances -------------------------------------------------------------
@@ -309,12 +400,9 @@ void services_init(espp::DispatcherWorker *link, const ServicesCallbacks &callba
     logger.warn("✅ SPIFFS mounted successfully");
   }
 
-  // NVS (BLE bonds only)
-  nvs_storage = std::make_unique<espp::Nvs>();
-  std::error_code ec;
-  nvs_storage->init(ec);
-  if (ec)
-    logger.error("NVS init failed: {}", ec.message());
+  // Load bond names from SPIFFS
+  load_bond_names();
+
   const auto settings = load_settings();
   // no transport (plain HID build): replies have nowhere to go
   const auto send = link ? link->sender() : [](std::span<const uint8_t>) {};
@@ -396,6 +484,8 @@ void services_init(espp::DispatcherWorker *link, const ServicesCallbacks &callba
       .on_action = callbacks.on_action,
       .bonds = callbacks.bonds,
       .forget_bond = callbacks.forget_bond,
+      .disconnect_bond = callbacks.disconnect_bond,
+      .rename_bond = callbacks.rename_bond,
       .log_level = espp::Logger::Verbosity::INFO});
   if (!link)
     return; // the module still holds + serves the settings for the app

@@ -55,6 +55,13 @@ public:
   /// Forgets one bond; on failure return false and set @p error.
   using forget_bond_fn = std::function<bool(const std::array<uint8_t, 6> &address,
                                             uint8_t address_type, std::string &error)>;
+  /// Disconnects one bond without forgetting it; on failure return false and set @p error.
+  using disconnect_bond_fn = std::function<bool(const std::array<uint8_t, 6> &address,
+                                                uint8_t address_type, std::string &error)>;
+  /// Renames one bond; on failure return false and set @p error.
+  using rename_bond_fn = std::function<bool(const std::array<uint8_t, 6> &address,
+                                            uint8_t address_type, const std::string &name,
+                                            std::string &error)>;
 
   struct Config {
     send_fn send{nullptr};
@@ -64,6 +71,8 @@ public:
     action_fn on_action{nullptr};
     bonds_fn bonds{nullptr};
     forget_bond_fn forget_bond{nullptr};
+    disconnect_bond_fn disconnect_bond{nullptr};
+    rename_bond_fn rename_bond{nullptr};
     espp::Logger::Verbosity log_level{espp::Logger::Verbosity::WARN};
   };
 
@@ -75,6 +84,8 @@ public:
       , on_action_(config.on_action)
       , bonds_(config.bonds)
       , forget_bond_(config.forget_bond)
+      , disconnect_bond_(config.disconnect_bond)
+      , rename_bond_(config.rename_bond)
       , settings_(config.initial) {}
 
   /// The dispatcher module id this module answers on.
@@ -177,6 +188,36 @@ public:
       send_bonds();
       break;
     }
+    case Msg::DisconnectBond: {
+      const auto target = device_config::parse_disconnect_bond_payload(frame.payload);
+      if (!target) {
+        send_error(request, ErrorCode::Malformed, "DISCONNECT_BOND payload must be [addr 6B][type u8]");
+        break;
+      }
+      std::string error;
+      if (!disconnect_bond_ || !disconnect_bond_(target->first, target->second, error)) {
+        send_error(request, ErrorCode::NotFound, error.empty() ? "no such bond" : error);
+        break;
+      }
+      send(Msg::Ok, device_config::make_ok_payload(request));
+      send_bonds();
+      break;
+    }
+    case Msg::RenameBond: {
+      const auto target = device_config::parse_rename_bond_payload(frame.payload);
+      if (!target) {
+        send_error(request, ErrorCode::Malformed, "RENAME_BOND payload must be [addr 6B][type u8][name str]");
+        break;
+      }
+      std::string error;
+      if (!rename_bond_ || !rename_bond_(std::get<0>(*target), std::get<1>(*target), std::get<2>(*target), error)) {
+        send_error(request, ErrorCode::Failed, error.empty() ? "rename failed" : error);
+        break;
+      }
+      send(Msg::Ok, device_config::make_ok_payload(request));
+      send_bonds();
+      break;
+    }
     default:
       send_error(request, ErrorCode::UnknownRequest, "unknown request");
       break;
@@ -221,6 +262,8 @@ protected:
   action_fn on_action_;
   bonds_fn bonds_;
   forget_bond_fn forget_bond_;
+  disconnect_bond_fn disconnect_bond_;
+  rename_bond_fn rename_bond_;
 
   mutable std::mutex mutex_;
   Settings settings_;
