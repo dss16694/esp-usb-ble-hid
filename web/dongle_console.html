@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dongle Console</title>
-  <meta name="description" content="Browser console for the ESP USB BLE HID gamepad dongle: device status and settings, firmware update (OTA) and crash-dump retrieval over WebUSB.">
+  <title>接收器控制台</title>
+  <meta name="description" content="ESP USB BLE HID 游戏手柄接收器的浏览器控制台：设备状态和设置、固件更新 (OTA) 以及通过 WebUSB 获取崩溃转储。">
   <meta name="color-scheme" content="light dark">
   <style>
     /* ------------------------------------------------------------------
@@ -362,30 +362,30 @@
         <circle cx="22" cy="16" r="1.2" fill="currentColor"/><circle cx="25" cy="19" r="1.2" fill="currentColor"/>
       </svg>
       <div>
-        <h1>Dongle Console</h1>
+        <h1>接收器控制台</h1>
         <div class="sub">ESP USB BLE HID · WebUSB</div>
       </div>
     </div>
     <div class="conn">
-      <span id="status" class="pill">Disconnected</span>
+      <span id="status" class="pill">未连接</span>
       <span id="devBadge" class="devbadge" hidden></span>
-      <label class="auto small-text" title="Open a permitted dongle by itself: on page load, when one is plugged in, and after a reboot the console asked for. After a reboot into the bootloader it does not chase the ROM device; once the dongle is flashed and reset it re-enumerates as a dongle and is opened like any plug-in. Manual Connect always works."><input type="checkbox" id="autoConnect" checked> Auto-connect</label>
-      <button id="connectBtn" class="primary" type="button">Connect dongle</button>
-      <button id="anyBtn" class="ghost" type="button" title="Show every USB device instead of only the dongle (VID 057E / PID 2009)">Pick any USB device…</button>
+      <label class="auto small-text" title="自动打开已授权的接收器：页面加载时、插入时以及控制台请求重启后。重启进入 bootloader 后不会追踪 ROM 设备；接收器刷写并重置后会重新枚举为接收器并像任何插入设备一样打开。手动连接始终有效。"><input type="checkbox" id="autoConnect" checked> 自动连接</label>
+      <button id="connectBtn" class="primary" type="button">连接接收器</button>
+      <button id="anyBtn" class="ghost" type="button" title="显示所有 USB 设备而不仅仅是接收器 (VID 057E / PID 2009)">选择任意 USB 设备…</button>
     </div>
   </header>
 
   <div id="unsupported" class="banner danger" hidden>
-    WebUSB is not available here. Open this page in Chrome, Edge or another Chromium-based browser
-    from <code>https://</code>, <code>http://localhost</code> or a local <code>file://</code> path.
+    WebUSB 在此不可用。请在 Chrome、Edge 或其他基于 Chromium 的浏览器中打开此页面
+    ，并使用 <code>https://</code>、<code>http://localhost</code> 或本地 <code>file://</code> 路径。
   </div>
 
   <nav class="tabs" role="tablist" aria-label="Console sections">
-    <button role="tab" id="tabbtn-device" data-tab="device" aria-selected="true" aria-controls="tab-device" type="button">Device<span class="dot"></span></button>
-    <button role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings" tabindex="-1" type="button">Settings<span class="dot"></span></button>
-    <button role="tab" id="tabbtn-system" data-tab="system" aria-selected="false" aria-controls="tab-system" tabindex="-1" type="button">System<span class="dot"></span></button>
-    <button role="tab" id="tabbtn-firmware" data-tab="firmware" aria-selected="false" aria-controls="tab-firmware" tabindex="-1" type="button">Firmware<span class="dot"></span></button>
-    <button role="tab" id="tabbtn-coredump" data-tab="coredump" aria-selected="false" aria-controls="tab-coredump" tabindex="-1" type="button">Crash dump<span class="dot"></span></button>
+    <button role="tab" id="tabbtn-device" data-tab="device" aria-selected="true" aria-controls="tab-device" type="button">设备<span class="dot"></span></button>
+    <button role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings" tabindex="-1" type="button">设置<span class="dot"></span></button>
+    <button role="tab" id="tabbtn-system" data-tab="system" aria-selected="false" aria-controls="tab-system" tabindex="-1" type="button">系统<span class="dot"></span></button>
+    <button role="tab" id="tabbtn-firmware" data-tab="firmware" aria-selected="false" aria-controls="tab-firmware" tabindex="-1" type="button">固件<span class="dot"></span></button>
+    <button role="tab" id="tabbtn-coredump" data-tab="coredump" aria-selected="false" aria-controls="tab-coredump" tabindex="-1" type="button">崩溃转储<span class="dot"></span></button>
   </nav>
 
   <main>
@@ -393,58 +393,58 @@
     <section id="tab-device" role="tabpanel" aria-labelledby="tabbtn-device">
       <div class="card">
         <div class="card-head">
-          <h2>Status</h2>
-          <span id="infoAuto" class="muted small-text">auto-refresh 2 s</span>
-          <button id="infoBtn" class="small" type="button" disabled>Refresh now</button>
+          <h2>状态</h2>
+          <span id="infoAuto" class="muted small-text">自动刷新 2秒</span>
+          <button id="infoBtn" class="small" type="button" disabled>立即刷新</button>
         </div>
         <div class="badges">
           <span id="bUsb" class="badge">USB</span>
-          <span id="bBle" class="badge">Controller</span>
-          <span id="bScan" class="badge">Scanning</span>
-          <span id="bPair" class="badge">Pairing</span>
+          <span id="bBle" class="badge">控制器</span>
+          <span id="bScan" class="badge">扫描中</span>
+          <span id="bPair" class="badge">配对中</span>
         </div>
         <dl class="kv">
-          <dt>Controller</dt><dd id="iController" class="mono">—</dd>
-          <dt>Battery</dt><dd><span id="iBattery">—</span><span id="iBatteryMeter" class="meter" hidden><i></i></span></dd>
-          <dt>Paired controllers</dt><dd id="iBonds">—</dd>
-          <dt>Uptime</dt><dd id="iUptime">—</dd>
-          <dt>Project</dt><dd id="iProject">—</dd>
-          <dt>Firmware</dt><dd id="iFirmware" class="mono">—</dd>
-          <dt>Latest release</dt><dd id="iUpdate" class="muted">not checked</dd>
-          <dt>Hardware</dt><dd id="iHardware">—</dd>
+          <dt>控制器</dt><dd id="iController" class="mono">—</dd>
+          <dt>电量</dt><dd><span id="iBattery">—</span><span id="iBatteryMeter" class="meter" hidden><i></i></span></dd>
+          <dt>已配对控制器</dt><dd id="iBonds">—</dd>
+          <dt>运行时间</dt><dd id="iUptime">—</dd>
+          <dt>项目</dt><dd id="iProject">—</dd>
+          <dt>固件</dt><dd id="iFirmware" class="mono">—</dd>
+          <dt>最新版本</dt><dd id="iUpdate" class="muted">未检查</dd>
+          <dt>硬件</dt><dd id="iHardware">—</dd>
           <dt>ESP-IDF</dt><dd id="iIdf" class="mono">—</dd>
         </dl>
-        <div class="link-block" aria-label="Link diagnostics">
-          <div class="link-label">Link</div>
+        <div class="link-block" aria-label="链接诊断">
+          <div class="link-label">链接</div>
           <dl class="kv">
-            <dt>Controller link</dt><dd id="lState">—</dd>
-            <dt>BLE input</dt><dd id="lBle">—</dd>
-            <dt>USB output</dt><dd id="lUsb">—</dd>
+            <dt>控制器链接</dt><dd id="lState">—</dd>
+            <dt>BLE 输入</dt><dd id="lBle">—</dd>
+            <dt>USB 输出</dt><dd id="lUsb">—</dd>
           </dl>
           <div id="linkNote" class="note small-text muted" hidden></div>
         </div>
-        <div id="infoNote" class="note muted small-text">Connect the dongle to read its status.</div>
+        <div id="infoNote" class="note muted small-text">连接接收器以读取其状态。</div>
       </div>
 
       <div class="stack">
         <div class="card">
-          <div class="card-head"><h2>Actions</h2></div>
+          <div class="card-head"><h2>操作</h2></div>
           <div class="actions">
-            <button id="actPair" type="button" disabled>Start pairing</button>
-            <button id="actForget" class="danger" type="button" disabled>Forget all controllers</button>
-            <button id="actReboot" class="danger" type="button" disabled>Reboot dongle</button>
+            <button id="actPair" type="button" disabled>开始配对</button>
+            <button id="actForget" class="danger" type="button" disabled>忘记所有控制器</button>
+            <button id="actReboot" class="danger" type="button" disabled>重启接收器</button>
           </div>
           <div id="actionConfirm" class="confirm-slot"></div>
-          <div id="actionNote" class="note muted small-text">Pairing mode is the same as holding the dongle's button. Rebooting drops the USB link; the console reconnects when the dongle comes back.</div>
+          <div id="actionNote" class="note muted small-text">配对模式与按住接收器按钮相同。重启会断开 USB 链接；当接收器恢复时控制台会重新连接。</div>
         </div>
         <div class="card">
           <div class="card-head">
-            <h2>Paired controllers</h2>
+            <h2>已配对控制器</h2>
             <span id="bondsCount" class="muted small-text"></span>
-            <button id="bondsRefresh" class="small" type="button" disabled>Refresh</button>
+            <button id="bondsRefresh" class="small" type="button" disabled>刷新</button>
           </div>
           <ul id="bondsList" class="bonds" aria-label="Paired controllers">
-            <li class="bond-empty muted">Connect the dongle to list its paired controllers.</li>
+            <li class="bond-empty muted">连接接收器以列出已配对的控制器。</li>
           </ul>
           <div id="bondsConfirm" class="confirm-slot"></div>
           <div id="bondsNote" class="note muted small-text"></div>
@@ -458,60 +458,60 @@
     <section id="tab-settings" role="tabpanel" aria-labelledby="tabbtn-settings" hidden>
       <div class="card">
         <div class="card-head">
-          <h2>Settings</h2>
+          <h2>设置</h2>
           <span id="settingsDirty" class="dirty" hidden></span>
-          <button id="settingsReload" class="small" type="button" disabled>Reload</button>
+          <button id="settingsReload" class="small" type="button" disabled>重新加载</button>
         </div>
         <form id="settingsForm" class="form" autocomplete="off">
           <div class="field">
-            <label for="s_invert_left_y">Invert left stick Y</label>
+            <label for="s_invert_left_y">反转左摇杆 Y 轴</label>
             <span class="switch"><input type="checkbox" id="s_invert_left_y" data-key="invert_left_y" disabled><i></i></span>
           </div>
           <div class="field">
-            <label for="s_invert_right_y">Invert right stick Y</label>
+            <label for="s_invert_right_y">反转右摇杆 Y 轴</label>
             <span class="switch"><input type="checkbox" id="s_invert_right_y" data-key="invert_right_y" disabled><i></i></span>
           </div>
           <div class="field">
-            <label for="s_swap_ab">Swap A / B</label>
+            <label for="s_swap_ab">交换 A / B 键</label>
             <span class="switch"><input type="checkbox" id="s_swap_ab" data-key="swap_ab" disabled><i></i></span>
-            <span class="hint">Xbox-style physical layout on the Switch.</span>
+            <span class="hint">Switch 上的 Xbox 风格物理布局。</span>
           </div>
           <div class="field">
-            <label for="s_swap_xy">Swap X / Y</label>
+            <label for="s_swap_xy">交换 X / Y 键</label>
             <span class="switch"><input type="checkbox" id="s_swap_xy" data-key="swap_xy" disabled><i></i></span>
           </div>
           <div class="field slider">
-            <label for="s_deadzone_percent">Stick deadzone</label>
+            <label for="s_deadzone_percent">摇杆死区</label>
             <output id="o_deadzone_percent" for="s_deadzone_percent">0 %</output>
             <input type="range" id="s_deadzone_percent" data-key="deadzone_percent" min="0" max="50" step="1" value="0" disabled>
-            <span class="hint">Radial deadzone, 0–50 % of full travel.</span>
+            <span class="hint">径向死区，全行程的 0–50%。</span>
           </div>
           <div class="field slider">
-            <label for="s_led_brightness">Status LED brightness</label>
+            <label for="s_led_brightness">状态 LED 亮度</label>
             <output id="o_led_brightness" for="s_led_brightness">100 %</output>
             <input type="range" id="s_led_brightness" data-key="led_brightness" min="0" max="100" step="1" value="100" disabled>
-            <span class="hint">Overall brightness: scanning, pairing and connected.</span>
+            <span class="hint">整体亮度：扫描、配对和已连接状态。</span>
           </div>
           <div class="field slider">
-            <label for="s_led_connected_brightness">LED level while connected</label>
+            <label for="s_led_connected_brightness">连接时 LED 亮度</label>
             <output id="o_led_connected_brightness" for="s_led_connected_brightness">25 %</output>
             <input type="range" id="s_led_connected_brightness" data-key="led_connected_brightness" min="0" max="100" step="1" value="25" disabled>
-            <span class="hint">Steady level once a controller is connected, as a share of the brightness above. 0 turns it off while playing.</span>
+            <span class="hint">控制器连接后的稳定亮度，为上述亮度的百分比。0 表示游戏时关闭。</span>
           </div>
           <div class="field">
-            <label for="s_led_activity_blink">Blink LED on every input</label>
+            <label for="s_led_activity_blink">每次输入时闪烁 LED</label>
             <span class="switch"><input type="checkbox" id="s_led_activity_blink" data-key="led_activity_blink" disabled><i></i></span>
-            <span class="hint">Debugging aid: toggles the LED with each report forwarded to the host instead of holding it steady.</span>
+            <span class="hint">调试辅助：每次向主机转发报告时切换 LED 而不是保持稳定。</span>
           </div>
           <div class="field text">
-            <label for="s_ble_name">BLE device name</label>
+            <label for="s_ble_name">BLE 设备名称</label>
             <input type="text" id="s_ble_name" data-key="ble_name" maxlength="31" spellcheck="false" placeholder="Switch" disabled>
-            <span class="hint">1–31 printable ASCII characters. Applies after reboot.</span>
+            <span class="hint">1–31 个可打印 ASCII 字符。重启后生效。</span>
           </div>
         </form>
         <div class="actions">
-          <button id="settingsApply" class="primary" type="button" disabled>Apply changes</button>
-          <button id="settingsReset" class="danger" type="button" disabled>Reset to defaults</button>
+          <button id="settingsApply" class="primary" type="button" disabled>应用更改</button>
+          <button id="settingsReset" class="danger" type="button" disabled>重置为默认值</button>
         </div>
         <div id="settingsConfirm" class="confirm-slot"></div>
         <div id="settingsNote" class="note muted small-text"></div>
@@ -522,74 +522,74 @@
     <section id="tab-system" role="tabpanel" aria-labelledby="tabbtn-system" hidden>
       <div class="card wide">
         <div class="card-head">
-          <h2>System</h2>
+          <h2>系统</h2>
           <span id="sysInfo" class="muted small-text"></span>
-          <button id="sysRefreshBtn" class="small" type="button" disabled>Refresh</button>
+          <button id="sysRefreshBtn" class="small" type="button" disabled>刷新</button>
         </div>
-        <dl id="sysRows" class="kv"><dt>Info</dt><dd class="muted">(not read yet)</dd></dl>
+        <dl id="sysRows" class="kv"><dt>信息</dt><dd class="muted">（尚未读取）</dd></dl>
         <div class="actions">
-          <label class="small-text muted">Delay <input id="sysDelay" type="number" min="0" max="65535" step="50" value="250" style="width: 6em;"> ms</label>
-          <button id="sysRebootBtn" class="danger" type="button" disabled>Reboot</button>
-          <button id="sysBootloaderBtn" class="danger" type="button" disabled>Reboot into bootloader</button>
+          <label class="small-text muted">延迟 <input id="sysDelay" type="number" min="0" max="65535" step="50" value="250" style="width: 6em;"> 毫秒</label>
+          <button id="sysRebootBtn" class="danger" type="button" disabled>重启</button>
+          <button id="sysBootloaderBtn" class="danger" type="button" disabled>重启进入 bootloader</button>
         </div>
         <div id="sysConfirm" class="confirm-slot"></div>
-        <div id="sysNote" class="note muted small-text">Reboot into bootloader puts the dongle in the ESP32-S3 ROM download mode: it re-enumerates as the ROM's USB port (no buttons needed, even inside a Switch dock), <code>idf.py flash</code> / <code>esptool</code> program it, then it must be reset or replugged. The console cannot reconnect on its own after that.</div>
+        <div id="sysNote" class="note muted small-text">重启进入 bootloader 会将接收器置于 ESP32-S3 ROM 下载模式：它会重新枚举为 ROM 的 USB 端口（无需按按钮，即使在 Switch 底座内），使用 <code>idf.py flash</code> / <code>esptool</code> 烧录后必须重置或重新插入。之后控制台无法自动重新连接。</div>
       </div>
       <div id="monCard" class="card wide">
         <div class="card-head">
-          <h2>Memory</h2>
+          <h2>内存</h2>
           <span id="monInfo" class="muted small-text"></span>
-          <button id="monRefreshBtn" class="small" type="button" disabled>Refresh</button>
+          <button id="monRefreshBtn" class="small" type="button" disabled>刷新</button>
         </div>
-        <div id="monGauges" class="gauges"><p class="muted small-text" style="margin: 0;">(not read yet)</p></div>
-        <div id="monNote" class="note muted small-text">Heap regions as reported by the monitor service; the red mark is the peak usage (lowest free) since boot.</div>
+        <div id="monGauges" class="gauges"><p class="muted small-text" style="margin: 0;">（尚未读取）</p></div>
+        <div id="monNote" class="note muted small-text">监控服务报告的堆区域；红色标记是启动以来的峰值使用量（最低空闲量）。</div>
       </div>
     </section>
     <section id="tab-firmware" role="tabpanel" aria-labelledby="tabbtn-firmware" hidden>
       <div class="card">
         <div class="card-head">
-          <h2>Running image</h2>
-          <button id="otaStatusBtn" class="small" type="button" disabled>Check status</button>
+          <h2>运行中的镜像</h2>
+          <button id="otaStatusBtn" class="small" type="button" disabled>检查状态</button>
         </div>
         <dl class="kv">
-          <dt>Firmware</dt><dd id="otaFw" class="mono">—</dd>
-          <dt>Rollback</dt><dd id="otaRollback">—</dd>
+          <dt>固件</dt><dd id="otaFw" class="mono">—</dd>
+          <dt>回滚</dt><dd id="otaRollback">—</dd>
         </dl>
         <div id="verifyPanel" class="banner" hidden style="margin: 12px 0 0;">
           <div id="verifyText"></div>
           <div class="actions">
-            <button id="markValidBtn" class="primary" type="button">Confirm this firmware</button>
-            <button id="rollbackBtn" class="danger" type="button">Roll back to previous</button>
+            <button id="markValidBtn" class="primary" type="button">确认此固件</button>
+            <button id="rollbackBtn" class="danger" type="button">回滚到上一版本</button>
           </div>
         </div>
         <div class="actions">
-          <button id="markValidBtn2" type="button" disabled>Mark running image valid</button>
-          <button id="rollbackBtn2" class="danger" type="button" disabled>Roll back and reboot</button>
+          <button id="markValidBtn2" type="button" disabled>标记运行镜像为有效</button>
+          <button id="rollbackBtn2" class="danger" type="button" disabled>回滚并重启</button>
         </div>
         <div id="otaConfirm" class="confirm-slot"></div>
-        <div id="otaStatusNote" class="note muted small-text">A freshly flashed image boots "pending verify" and rolls back on the next reset unless the host confirms it here.</div>
+        <div id="otaStatusNote" class="note muted small-text">新刷写的镜像启动时为"待验证"状态，除非在此确认，否则下次重置时会回滚。</div>
       </div>
 
       <div class="card">
         <div class="card-head">
-          <h2>Update firmware</h2>
+          <h2>更新固件</h2>
           <span id="updateChecked" class="muted small-text"></span>
-          <button id="checkUpdatesBtn" class="small" type="button" title="Query GitHub Releases for the latest published firmware">Check for updates</button>
+          <button id="checkUpdatesBtn" class="small" type="button" title="从 GitHub Releases 查询最新发布的固件">检查更新</button>
         </div>
         <div class="update-block">
-          <div id="updateStatus" class="update-line small-text muted">Latest release: not checked yet.</div>
+          <div id="updateStatus" class="update-line small-text muted">Latest release: 未检查 yet.</div>
           <div class="row">
-            <button id="installReleaseBtn" type="button" hidden disabled>Download and install</button>
+            <button id="installReleaseBtn" type="button" hidden disabled>下载并安装</button>
             <span id="installReleaseInfo" class="muted small-text" hidden></span>
           </div>
           <div id="installConfirm" class="confirm-slot"></div>
         </div>
         <div class="row">
-          <label class="filebtn">Choose .bin file<input type="file" id="fileInput" accept=".bin,application/octet-stream" aria-label="Firmware image (.bin)"></label>
-          <span id="fileInfo" class="muted small-text">No file selected.</span>
+          <label class="filebtn">选择 .bin 文件<input type="file" id="fileInput" accept=".bin,application/octet-stream" aria-label="固件镜像 (.bin)"></label>
+          <span id="fileInfo" class="muted small-text">未选择文件。</span>
         </div>
         <div class="row">
-          <label for="chunkSize" class="muted small-text">Chunk size</label>
+          <label for="chunkSize" class="muted small-text">块大小</label>
           <select id="chunkSize">
             <option value="512">512 B</option>
             <option value="1024" selected>1024 B</option>
@@ -598,12 +598,12 @@
           </select>
         </div>
         <div class="actions">
-          <button id="uploadBtn" class="primary" type="button" disabled>Flash firmware</button>
-          <button id="abortBtn" class="danger" type="button" disabled>Abort update</button>
+          <button id="uploadBtn" class="primary" type="button" disabled>刷写固件</button>
+          <button id="abortBtn" class="danger" type="button" disabled>中止更新</button>
         </div>
         <div class="progress"><div id="otaFill" class="progress-fill"></div></div>
         <div class="stats"><span id="otaBytes">0 / 0 bytes</span><span id="otaPercent">0%</span><span id="otaRate">-</span></div>
-        <div id="otaNote" class="note muted small-text">The dongle erases its update partition on BEGIN (a few seconds), then writes each chunk before acknowledging the next. After FINISH it reboots into the new image and the USB link drops.</div>
+        <div id="otaNote" class="note muted small-text">接收器在 BEGIN 时擦除更新分区（几秒钟），然后在确认下一块之前写入每个块。FINISH 后重启进入新镜像，USB 链接断开。</div>
       </div>
     </section>
 
@@ -611,34 +611,34 @@
     <section id="tab-coredump" role="tabpanel" aria-labelledby="tabbtn-coredump" hidden>
       <div class="card wide">
         <div class="card-head">
-          <h2>Last crash</h2>
+          <h2>上次崩溃</h2>
           <span id="cdInfo" class="muted small-text"></span>
-          <button id="cdRefreshBtn" class="small" type="button" disabled>Refresh</button>
+          <button id="cdRefreshBtn" class="small" type="button" disabled>刷新</button>
         </div>
-        <pre id="cdReport" class="report">(not read yet)</pre>
+        <pre id="cdReport" class="report">（尚未读取）</pre>
         <div class="actions">
-          <button id="cdElfBtn" class="primary" type="button" disabled>Download core.elf</button>
-          <button id="cdRawBtn" type="button" disabled>Download raw image</button>
-          <button id="cdEraseBtn" class="danger" type="button" disabled>Erase stored dump</button>
+          <button id="cdElfBtn" class="primary" type="button" disabled>下载 core.elf</button>
+          <button id="cdRawBtn" type="button" disabled>下载原始镜像</button>
+          <button id="cdEraseBtn" class="danger" type="button" disabled>擦除已存储的转储</button>
         </div>
         <div id="cdConfirm" class="confirm-slot"></div>
         <div class="progress"><div id="cdFill" class="progress-fill"></div></div>
         <div class="stats"><span id="cdBytes">0 / 0 bytes</span><span id="cdPercent">0%</span><span id="cdRate">-</span></div>
-        <div id="cdNote" class="note muted small-text">core.elf strips the flash header in front of the ELF magic; the raw image is the whole stored blob (use <code>--core-format raw</code> for it).</div>
+        <div id="cdNote" class="note muted small-text">core.elf 去除了 ELF magic 前面的 flash 头部；原始镜像是整个存储的数据块（使用 <code>--core-format raw</code>）。</div>
       </div>
       <div class="card wide">
-        <div class="card-head"><h2>Decode on your PC</h2></div>
-        <p class="muted small-text" style="margin: 0 0 8px;">Run inside an ESP-IDF shell, next to the build that produced the running firmware:</p>
-        <div class="cmdrow"><pre id="cmdCoredump">espcoredump.py info_corefile --core core.elf --core-format elf build/esp-usb-ble-hid.elf</pre><button class="small" data-copy="cmdCoredump" type="button">Copy</button></div>
+        <div class="card-head"><h2>在 PC 上解码</h2></div>
+        <p class="muted small-text" style="margin: 0 0 8px;">在 ESP-IDF shell 中运行，位于生成运行固件的构建目录旁：</p>
+        <div class="cmdrow"><pre id="cmdCoredump">espcoredump.py info_corefile --core core.elf --core-format elf build/esp-usb-ble-hid.elf</pre><button class="small" data-copy="cmdCoredump" type="button">复制</button></div>
       </div>
     </section>
   </main>
 
-  <section class="logpanel" aria-label="Log">
+  <section class="logpanel" aria-label="日志">
     <div class="loghead">
-      <h2>Log</h2>
-      <label><input type="checkbox" id="logFrames"> Log frames (hex)</label>
-      <button id="clearLogBtn" class="small" type="button">Clear log</button>
+      <h2>日志</h2>
+      <label><input type="checkbox" id="logFrames"> 记录帧（十六进制）</label>
+      <button id="clearLogBtn" class="small" type="button">清空日志</button>
     </div>
     <div id="log" aria-live="polite"></div>
   </section>
@@ -704,7 +704,7 @@
                       BOOT_PARTITION: 12, OTA_STATE: 13, RESET_REASON: 14, UPTIME_MS: 15, MAC: 16, FLASH_SIZE: 17,
                       PSRAM_SIZE: 18, CPU_MHZ: 19, FREE_HEAP: 20, MIN_FREE_HEAP: 21, CAPABILITIES: 22 };
     const SYS_CAP_REBOOT = 0x01, SYS_CAP_BOOTLOADER = 0x02;
-    const SYS_RESET_REASON = ["unknown", "power-on", "external pin", "software", "panic", "interrupt watchdog",
+    const SYS_RESET_REASON = ["未知", "power-on", "external pin", "software", "panic", "interrupt watchdog",
                               "task watchdog", "other watchdog", "deep-sleep wake", "brownout", "SDIO", "USB", "JTAG",
                               "efuse error", "power glitch", "CPU lockup"];
     const SYS_OTA_STATE = { 0: "new", 1: "pending verify", 2: "valid", 3: "invalid", 4: "aborted", 0xFE: "undefined", 0xFF: "n/a (factory)" };
@@ -1259,10 +1259,10 @@
     //           "current" - same version, no dev suffix
     //           "dev"     - a build with commits on top of the release (or newer) base
     //           "ahead"   - a plain version newer than the latest release
-    //           "unknown" - one of the strings could not be parsed
+    //           "未知" - one of the strings could not be parsed
     function compareFirmware(running, latestTag) {
       const r = parseVersion(running), l = parseVersion(latestTag);
-      if (!r || !l) return { status: "unknown", running: r, latest: l, cmp: null };
+      if (!r || !l) return { status: "未知", running: r, latest: l, cmp: null };
       const cmp = compareVersionCore(r, l);
       let status;
       if (cmp < 0) status = "update";
@@ -1478,10 +1478,10 @@
     function applyDiscoveryToTabs() {
       for (const b of tabButtons) {
         const id = tabModuleId(b.dataset.tab);
-        b.classList.remove("present", "missing");
+        b.classList.remove("存在", "缺失");
         if (!transport || !discovered) { b.disabled = false; b.title = ""; continue; }
         const present = moduleAvailable(id);
-        b.classList.add(present ? "present" : "missing");
+        b.classList.add(present ? "存在" : "缺失");
         b.disabled = !present;
         b.title = present ? "" : "This firmware does not advertise this tab's service (" + moduleLabel(id, b.dataset.tab) + ")";
       }
@@ -1648,7 +1648,7 @@
       const cancelled = (gen) => gen <= sup.cancelBefore;
       const cancelCurrent = () => { sup.cancelBefore = sup.generation; };
       const clearTimer = () => { if (sup.timer) { clearTimeout(sup.timer); sup.timer = null; } };
-      const schedule = (gen, ms) => { clearTimer(); sup.timer = setTimeout(() => { sup.timer = null; attempt(gen); }, ms); };
+      const schedule = (gen, 毫秒) => { clearTimer(); sup.timer = setTimeout(() => { sup.timer = null; attempt(gen); }, 毫秒); };
       async function attempt(gen) {
         if (gen !== sup.generation || !sup.active) return;
         if (sup.inFlight) { sup.retryAfter = true; return; } // serialized: retry once the current attempt settles
@@ -1885,7 +1885,7 @@
       gate: openGate,
       enabled: () => els.autoConnect.checked,
       rebootDelaysMs: [500, 1000, 1500, 2000, 3000, 4000].concat(new Array(16).fill(5000)),
-      log: (cls, text) => { logLine(cls === "warn" ? "warn" : "sys", text); if (/^Auto-reconnect stopped|^Not reconnecting/.test(text)) setStatus("", "Disconnected"); },
+      log: (cls, text) => { logLine(cls === "warn" ? "warn" : "sys", text); if (/^Auto-reconnect stopped|^Not reconnecting/.test(text)) setStatus("", "未连接"); },
       reconnect: reconnectAttempt,
       discard: () => disconnect(),
     });
@@ -2006,7 +2006,7 @@
       connIdentity = usbIdentity(device);
       reconnect.connected();
       t.startPump(handleRxBytes);
-      setStatus("connected", "Connected");
+      setStatus("connected", "已连接");
       updateUI();
       logLine("ok", (label || "Connected to") + " " + t.describe() +
               (serial ? " (serial " + serial + ")" : " (no USB serial number)") +
@@ -2040,7 +2040,7 @@
       parser.reset();
       forgetDeviceState();
       updateUI();
-      setStatus("", "Disconnected");
+      setStatus("", "未连接");
       logLine("sys", "Disconnected.");
       postReleased(deviceChannel, released); // only once the device is closed: a hub may reopen it on this notice
     }
@@ -2053,13 +2053,13 @@
       forgetDeviceState();
       updateUI();
       if (expectBootloader) {
-        setStatus("", "Disconnected");
+        setStatus("", "未连接");
         logLine("sys", "USB link dropped as expected — the dongle is in the ROM bootloader (download mode). Flash it with idf.py flash / esptool on the port it re-enumerated as, then reset or replug it" + (els.autoConnect.checked ? " — Auto-connect opens it again once it is back as a dongle." : " and use “Connect dongle”."));
       } else if (expectRestart) {
-        setStatus(els.autoConnect.checked ? "busy" : "", els.autoConnect.checked ? "Dongle restarting…" : "Disconnected");
+        setStatus(els.autoConnect.checked ? "busy" : "", els.autoConnect.checked ? "Dongle restarting…" : "未连接");
         logLine("sys", "USB link dropped as expected — the dongle is restarting." + (els.autoConnect.checked ? " Waiting for it to come back…" : " Auto-connect is off: use “Connect dongle” once it is back."));
       } else {
-        setStatus("", "Disconnected");
+        setStatus("", "未连接");
         logLine("err", why || "USB device disconnected.");
       }
       expectBootloader = false; expectRestart = false;
@@ -2171,7 +2171,7 @@
           timer: setTimeout(() => {
             if (!pendingTxn) return;
             const p = pendingTxn; pendingTxn = null;
-            p.reject(Object.assign(new Error(label + " timed out after " + timeoutMs + " ms"), { timeout: true }));
+            p.reject(Object.assign(new Error(label + " timed out after " + timeoutMs + " 毫秒"), { timeout: true }));
           }, timeoutMs),
         };
         transport.send(frame).catch((e) => {
@@ -2219,7 +2219,7 @@
       if (moduleAvailable(systemModuleId())) await refreshSystemInfo(true);
       if (activeTab === "system") await ensureHeapLoaded();
       if (moduleAvailable(coredumpModuleId()) && activeTab === "coredump") await refreshCoreDump();
-      if (transport) setStatus("connected", "Connected");
+      if (transport) setStatus("connected", "已连接");
       // Firmware version is known now (INFO / OTA STATUS): compare it with the
       // latest GitHub release in the background (cached for 10 min).
       checkForUpdates(false).catch(() => {});
@@ -2274,7 +2274,7 @@
       els.settingsApply.disabled = !dev || !deviceSettings || !settingsDirtyKeys().length || !!settingsInvalid();
       els.settingsReset.disabled = !dev || !deviceSettings;
       els.actPair.disabled = !dev; els.actForget.disabled = !dev; els.actReboot.disabled = !dev;
-      els.infoAuto.textContent = dev ? "auto-refresh 2 s" : "auto-refresh paused";
+      els.infoAuto.textContent = dev ? "自动刷新 2秒" : "auto-refresh paused";
 
       const ota = connected && moduleAvailable(otaModuleId());
       const file = els.fileInput.files && els.fileInput.files[0];
@@ -2328,7 +2328,7 @@
         els.iBatteryMeter.firstElementChild.style.width = Math.min(100, info.battery) + "%";
         els.iBatteryMeter.classList.toggle("low", info.battery <= 20);
       } else {
-        els.iBattery.textContent = info.bleConnected ? "unknown" : "—";
+        els.iBattery.textContent = info.bleConnected ? "未知" : "—";
         els.iBatteryMeter.hidden = true;
       }
       els.iBonds.textContent = info.bonds + (info.bonds === 1 ? " controller" : " controllers");
@@ -2508,9 +2508,9 @@
         setNote(els.bondsNote, "ok", "Forgot " + who + ".");
         refreshInfo(true);
       } catch (e) {
-        const msg = (e && e.deviceError) ? "Dongle refused: " + e.message + (e.code === 5 ? " (it may already be gone — refreshing)" : "") : "Forget failed: " + e.message;
-        logLine("err", msg);
-        setNote(els.bondsNote, "err", msg);
+        const 毫秒g = (e && e.deviceError) ? "Dongle refused: " + e.message + (e.code === 5 ? " (it may already be gone — refreshing)" : "") : "Forget failed: " + e.message;
+        logLine("err", 毫秒g);
+        setNote(els.bondsNote, "err", 毫秒g);
         if (e && e.deviceError && e.code === 5) refreshBonds(true);
       }
     }
@@ -2606,9 +2606,9 @@
         logLine("ok", "Applied " + keys.length + " setting(s): " + keys.join(", ") + ".");
         setNote(els.settingsNote, "ok", "Saved. " + (keys.includes("ble_name") ? "The BLE name applies after a reboot." : ""));
       } catch (e) {
-        const msg = (e && e.deviceError) ? "Dongle rejected the settings: " + e.message : "Apply failed: " + e.message;
-        logLine("err", msg);
-        setNote(els.settingsNote, "err", msg);
+        const 毫秒g = (e && e.deviceError) ? "Dongle rejected the settings: " + e.message : "Apply failed: " + e.message;
+        logLine("err", 毫秒g);
+        setNote(els.settingsNote, "err", 毫秒g);
       }
       updateUI();
     }
@@ -2669,7 +2669,7 @@
     });
     els.actReboot.addEventListener("click", async () => {
       if (!transport) return;
-      const ok = await askConfirm(els.actionConfirm, els.actReboot, "Reboot the dongle now? The USB link drops for a few seconds.", "Reboot");
+      const ok = await askConfirm(els.actionConfirm, els.actReboot, "Reboot the dongle now? The USB link drops for a few 秒.", "Reboot");
       if (!ok || !transport) return;
       // armed when the request actually goes out (transact is serialized: a queued
       // reboot must not classify an earlier, unrelated link loss as a reboot)
@@ -2698,10 +2698,10 @@
     function clearSystem() {
       systemCaps = 0; lastSystemInfo = null; heapLoaded = false;
       els.sysRows.textContent = "";
-      kvRow(els.sysRows, "Info", "(not read yet)", "muted");
+      kvRow(els.sysRows, "Info", "（尚未读取）", "muted");
       els.sysInfo.textContent = "";
       els.monGauges.textContent = "";
-      const p = document.createElement("p"); p.className = "muted small-text"; p.style.margin = "0"; p.textContent = "(not read yet)";
+      const p = document.createElement("p"); p.className = "muted small-text"; p.style.margin = "0"; p.textContent = "（尚未读取）";
       els.monGauges.appendChild(p);
       els.monInfo.textContent = "";
     }
@@ -2767,7 +2767,7 @@
     }
     els.sysRebootBtn.addEventListener("click", async () => {
       if (!transport) return;
-      const ok = await askConfirm(els.sysConfirm, els.sysRebootBtn, "Reboot the dongle now (after " + rebootDelayMs() + " ms)? The USB link drops for a few seconds.", "Reboot");
+      const ok = await askConfirm(els.sysConfirm, els.sysRebootBtn, "Reboot the dongle now (after " + rebootDelayMs() + " 毫秒)? The USB link drops for a few 秒.", "Reboot");
       if (!ok || !transport) return;
       const armRestart = () => { expectRestart = true; expectBootloader = false; reconnect.expectReboot(); };
       try {
@@ -2845,7 +2845,7 @@
         const [reply] = await transact(monitorModuleId(), MON.GET_HEAP, null, { expect: [MON.HEAP], quiet: !!quiet });
         renderHeap(parseHeap(reply.payload));
         heapLoaded = true;
-        setNote(els.monNote, "muted", "Heap regions as reported by the monitor service; the red mark is the peak usage (lowest free) since boot.");
+        setNote(els.monNote, "muted", "监控服务报告的堆区域；红色标记是启动以来的峰值使用量（最低空闲量）。");
       } catch (e) {
         logLine("err", "Monitor GET_HEAP failed: " + e.message);
         setNote(els.monNote, "err", "Reading the heap failed: " + e.message);
@@ -2973,7 +2973,7 @@
     // ---- file selection --------------------------------------------------------
     els.fileInput.addEventListener("change", () => {
       const file = els.fileInput.files && els.fileInput.files[0];
-      if (!file) { els.fileInfo.textContent = "No file selected."; els.fileInfo.className = "muted small-text"; updateUI(); return; }
+      if (!file) { els.fileInfo.textContent = "未选择文件。"; els.fileInfo.className = "muted small-text"; updateUI(); return; }
       els.fileInfo.textContent = file.name + " — " + file.size.toLocaleString() + " bytes";
       els.fileInfo.className = "muted small-text";
       if (file.size === 0) { els.fileInfo.textContent += " — empty file, cannot flash."; els.fileInfo.className = "small-text note err"; }
@@ -3008,7 +3008,7 @@
       if (!beforeFirmware) { const st0 = await checkOtaStatus(true); if (st0) beforeFirmware = st0.firmware; }
 
       try {
-        logLine("sys", "BEGIN: " + name + ", " + image.length.toLocaleString() + " bytes (the dongle erases its update partition — this takes a few seconds)…");
+        logLine("sys", "BEGIN: " + name + ", " + image.length.toLocaleString() + " bytes (the dongle erases its update partition — this takes a few 秒)…");
         await transact(otaModuleId(), OTA.BEGIN, u32(image.length), { expect: [OTA.OK], timeoutMs: OTA_BEGIN_TIMEOUT_MS, quiet: true });
         logLine("sys", "Dongle ready; streaming " + chunkSize + " B chunks, one in flight…");
         while (sent < image.length) {
@@ -3046,7 +3046,7 @@
           setNote(els.otaNote, "err", "Update failed: " + e.message);
           if (transport) { try { await transact(otaModuleId(), OTA.ABORT, null, { expect: [OTA.OK] }); } catch (_) {} }
         }
-        if (transport) setStatus(e && e.userAbort ? "connected" : "error", e && e.userAbort ? "Connected" : "Update failed");
+        if (transport) setStatus(e && e.userAbort ? "connected" : "error", e && e.userAbort ? "已连接" : "Update failed");
       } finally {
         busy = false; uploading = false;
         updateUI();
@@ -3127,7 +3127,7 @@
       if (!rel) {
         if (updateChecking) text = "Checking GitHub for the latest release…";
         else if (updateCheckError) { text = "Update check failed: " + updateCheckError; tone = "warn"; }
-        else text = "Latest release: not checked yet.";
+        else text = "Latest release: 未检查 yet.";
       } else {
         const when = releaseDate(rel.publishedAt);
         const relLabel = rel.tag + (when ? " (released " + when + ")" : "");
@@ -3270,7 +3270,7 @@
         image = await downloadAsset(asset);
       } catch (e) {
         busy = false; updateUI();
-        if (transport) setStatus("connected", "Connected");
+        if (transport) setStatus("connected", "已连接");
         els.otaFill.className = "progress-fill failed";
         const why = (e && e.name === "TypeError") ? "the browser could not fetch it (network error or CORS blocked the download)" : e.message;
         logLine("err", "Download of " + asset.name + " failed: " + why);
@@ -3322,7 +3322,7 @@
           logLine("sys", "Clean boot history: no crash to report.");
         }
         els.cdInfo.textContent = dumpSize ? "core dump in flash: " + dumpSize.toLocaleString() + " bytes" : "no core dump image stored";
-        if (transport) setStatus("connected", "Connected");
+        if (transport) setStatus("connected", "已连接");
       } catch (e) {
         if (!(e && e.transportLost)) { logLine("err", "Crash summary failed: " + e.message); setNote(els.cdNote, "err", "Summary failed: " + e.message); }
       } finally { busy = false; updateUI(); }
@@ -3394,7 +3394,7 @@
         setNote(els.cdNote, "err", "Download failed: " + e.message);
       } finally {
         busy = false; updateUI();
-        if (transport) setStatus("connected", "Connected");
+        if (transport) setStatus("connected", "已连接");
       }
     }
     els.cdElfBtn.addEventListener("click", () => doDownload(false));
@@ -3416,7 +3416,7 @@
         setNote(els.cdNote, "err", "Erase failed: " + e.message);
       } finally {
         busy = false; updateUI();
-        if (transport) setStatus("connected", "Connected");
+        if (transport) setStatus("connected", "已连接");
       }
       await refreshCoreDump();
     });
