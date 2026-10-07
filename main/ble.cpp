@@ -351,6 +351,18 @@ class ScanCallbacks : public NimBLEScanCallbacks {
       espp::Logger({.tag = "BLE Scan Callbacks", .level = espp::Logger::Verbosity::INFO});
   void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override {
     logger.info("Advertised Device found: {}", advertisedDevice->toString());
+
+    const auto &addr = advertisedDevice->getAddress();
+
+    // Check if already connected to this device
+    auto pClients = NimBLEDevice::getConnectedClients();
+    for (auto *client : pClients) {
+      if (client && client->getPeerAddress() == addr) {
+        logger.debug("Device {} already connected, skipping", addr.toString());
+        return;
+      }
+    }
+
     bool should_connect = false;
     bool is_pairable_device =
         advertisedDevice->isAdvertisingService(hid_service_uuid) ||
@@ -365,18 +377,16 @@ class ScanCallbacks : public NimBLEScanCallbacks {
       should_connect = true;
     }
     if (should_connect) {
-      // tell the supervisor a connection is in flight BEFORE stopping the scan,
-      // so it does not restart the scan in the gap
+      // tell the supervisor a connection is in flight
       connect_pending = true;
       connect_started_us = esp_timer_get_time();
       link_state = BleLinkState::Connecting;
       set_link_detail(fmt::format("connecting to {}", advertisedDevice->getAddress().toString()));
 
-      /** stop scan before connecting, since we use async connections and don't
-          want to possibly try to connect to multiple devices. */
-      NimBLEDevice::getScan()->stop();
+      // DON'T stop scan for multi-controller support - let it continue discovering other devices
+      // Note: NimBLE can handle multiple async connections
 
-      logger.info("Found Our Device");
+      logger.info("Connecting to device {}", addr.toString());
       {
         // remember what it called itself, for the paired-controller list
         std::lock_guard<std::mutex> lk(advertised_name_mutex);
@@ -561,6 +571,12 @@ static bool timer_callback() {
 
   set_led_breathing(false);
   update_led_connected();
+
+  // Keep scanning to discover additional controllers (unless in pairing mode with max connections)
+  // This allows multiple controllers to connect over time
+  if (!connect_pending && ControllerManager::instance().count() < 3) {  // Limit to 3 controllers
+    ensure_scanning(now);
+  }
 
   // Process each connected controller
   for (auto *pClient : pClients) {
